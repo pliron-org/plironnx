@@ -5,7 +5,6 @@ use std::{path::PathBuf, process::ExitCode};
 
 use clap::Parser;
 
-use onnx_ir::Node;
 use plironnx::burn_onnx_ir::parse_onnx_file;
 
 #[derive(Parser)]
@@ -18,22 +17,8 @@ struct Cli {
 
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let graph = parse_onnx_file(&cli.input)?;
-    for node in &graph.nodes {
-        println!("Node: {}", node.name());
-
-        // Pattern match on node type to access operation-specific configuration
-        match node {
-            Node::Softmax(softmax_node) => {
-                println!("  Softmax on axis {}", softmax_node.config.axis);
-            }
-            Node::Conv2d(conv_node) => {
-                println!(
-                    "  Conv2d with kernel size {:?}",
-                    conv_node.config.kernel_size
-                );
-            }
-            _ => {}
-        }
+    for (i, node) in graph.nodes.iter().enumerate() {
+        println!("Node#{}: {}", i, node);
     }
     Ok(())
 }
