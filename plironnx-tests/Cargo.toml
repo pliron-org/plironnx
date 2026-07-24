@@ -1,0 +1,17 @@
+[package]
+name = "plironnx-tests"
+description = "Test harness comparing plironnx against burn-onnx's onnx-tests fixtures"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dev-dependencies]
+burn = { version = "0.21.0", features = ["flex", "std"] }
+burn-store = { version = "0.21.0", features = ["std", "burnpack"] }
+expect-test = "1"
+onnx-tests = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-tests", tag = "v0.21.0" }
+
+[build-dependencies]
+burn-onnx = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "burn-onnx", tag = "v0.21.0" }
+cargo_metadata = "0.23.1"

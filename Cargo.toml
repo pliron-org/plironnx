@@ -1,27 +1,31 @@
 [package]
 name = "plironnx"
 description = "Pliron for ONNX"
-
-version = "0.1.0"
-edition = "2024"
-license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/vaivaswatha/plironnx"
 categories = ["compilers"]
 keywords = ["pliron", "onnx", "tensor", "compiler"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[workspace]
+members = ["plironnx-tests"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
 
 [dependencies]
 pliron = { git = "https://github.com/pliron-org/pliron.git" }
 pliron-llvm = { git = "https://github.com/pliron-org/pliron.git" }
 pliron-common-dialects = { git = "https://github.com/pliron-org/pliron-common-dialects.git" }
 pliron-tensor = { git = "https://github.com/pliron-org/pliron-tensor.git" }
-onnx-ir = { path = "../burn-onnx/crates/onnx-ir" }
+onnx-ir = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-ir", tag = "v0.21.0" }
 
 thiserror = "2"
 log = { version = "0" }
 rustc-hash = "2"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0"
-
-[dev-dependencies]
-expect-test = "1"
