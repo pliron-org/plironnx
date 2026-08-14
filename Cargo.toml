@@ -2,7 +2,7 @@
 name = "plironnx"
 description = "Pliron for ONNX"
 readme = "README.md"
-repository = "https://github.com/vaivaswatha/plironnx"
+repository = "https://github.com/pliron-org/plironnx"
 categories = ["compilers"]
 keywords = ["pliron", "onnx", "tensor", "compiler"]
 version.workspace = true
