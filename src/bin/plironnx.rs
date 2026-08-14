@@ -19,6 +19,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let graph = parse_onnx_file(&cli.input)?;
     for (i, node) in graph.nodes.iter().enumerate() {
         println!("Node#{}: {}", i, node);
+        for input in node.inputs() {
+            match input.value_source {
+                onnx_ir::ValueSource::Static(_) => {
+                    let td = input.value().unwrap();
+                    println!("Static, TensorData: {}", td);
+                }
+                onnx_ir::ValueSource::Constant => {
+                    let td = input.value().unwrap();
+                    println!("Constant, TensorData: {}", td);
+                }
+                onnx_ir::ValueSource::Dynamic => {}
+                onnx_ir::ValueSource::Optional => {}
+            }
+        }
+        println!();
     }
     Ok(())
 }
