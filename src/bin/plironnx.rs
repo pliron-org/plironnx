@@ -5,47 +5,75 @@ use std::{path::PathBuf, process::ExitCode};
 
 use clap::Parser;
 
-use plironnx::burn_onnx_ir::parse_onnx_file;
+use pliron::{
+    context::Context,
+    irbuild::dialect_conversion::apply_dialect_conversion,
+    op::{Op, verify_op},
+    printable::Printable,
+    result::Result,
+};
+
+use plironnx::{
+    burn_onnx_ir::parse_onnx_file,
+    onnx::{conversions::OnnxToTensor, from_onnx_graph::build_module},
+};
 
 #[derive(Parser)]
 #[command(version, about = "Pliron for ONNX", long_about = None)]
 struct Cli {
-    /// Input ONNX model file
+    /// The input ONNX model file
     #[arg(value_name = "FILE", required = true, num_args = 1)]
     input: PathBuf,
+
+    /// Print the burn-onnx graph before the conversion
+    #[arg(long)]
+    dump_graph: bool,
+
+    /// Convert the `onnx` dialect to the `tensor` dialect
+    #[arg(long)]
+    to_tensor: bool,
 }
 
-fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+fn run(ctx: &mut Context, cli: Cli) -> Result<()> {
     let graph = parse_onnx_file(&cli.input)?;
-    for (i, node) in graph.nodes.iter().enumerate() {
-        println!("Node#{}: {}", i, node);
-        for input in node.inputs() {
-            match input.value_source {
-                onnx_ir::ValueSource::Static(_) => {
-                    let td = input.value().unwrap();
-                    println!("Static, TensorData: {}", td);
-                }
-                onnx_ir::ValueSource::Constant => {
-                    let td = input.value().unwrap();
-                    println!("Constant, TensorData: {}", td);
-                }
-                onnx_ir::ValueSource::Dynamic => {}
-                onnx_ir::ValueSource::Optional => {}
-            }
+
+    if cli.dump_graph {
+        println!("Graph inputs:");
+        for input in &graph.inputs {
+            println!("  {input}");
+        }
+        println!("Graph outputs:");
+        for output in &graph.outputs {
+            println!("  {output}");
+        }
+        for (i, node) in graph.nodes.iter().enumerate() {
+            println!("Node#{i}: {node}");
         }
         println!();
     }
+
+    let module = build_module(ctx, &graph, "onnx_module", "main")?;
+    verify_op(&module, ctx)?;
+
+    if cli.to_tensor {
+        apply_dialect_conversion(ctx, &mut OnnxToTensor, module.get_operation())?;
+        verify_op(&module, ctx)?;
+    }
+
+    println!("{}", module.get_operation().disp(ctx));
+
     Ok(())
 }
 
 pub fn main() -> ExitCode {
     env_logger::init();
     let cli = Cli::parse();
+    let ctx = &mut Context::new();
 
-    match run(cli) {
+    match run(ctx, cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("{}", e.disp(ctx));
             ExitCode::FAILURE
         }
     }

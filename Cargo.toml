@@ -17,11 +17,17 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
 pliron = { git = "https://github.com/pliron-org/pliron.git" }
 pliron-llvm = { git = "https://github.com/pliron-org/pliron.git" }
 pliron-common-dialects = { git = "https://github.com/pliron-org/pliron-common-dialects.git" }
 pliron-tensor = { git = "https://github.com/pliron-org/pliron-tensor.git" }
+
+[dependencies]
+pliron.workspace = true
+pliron-llvm.workspace = true
+pliron-common-dialects.workspace = true
+pliron-tensor.workspace = true
 onnx-ir = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-ir", tag = "v0.21.0" }
 
 thiserror = "2"
