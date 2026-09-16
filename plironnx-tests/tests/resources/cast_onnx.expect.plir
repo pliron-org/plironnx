@@ -1,0 +1,26 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x1 : builtin.integer i1>, tensor.ranked <2x1 : builtin.integer i32>, tensor.ranked <2x1 : builtin.fp32 >, builtin.fp32 ) -> (tensor.ranked <2x1 : builtin.integer i1>, tensor.ranked <2x1 : builtin.integer i32>, tensor.ranked <2x1 : builtin.fp32 >, tensor.ranked <2x1 : builtin.integer i1>, tensor.ranked <2x1 : builtin.integer i32>, tensor.ranked <2x1 : builtin.fp32 >, tensor.ranked <2x1 : builtin.integer i1>, tensor.ranked <2x1 : builtin.integer i32>, tensor.ranked <2x1 : builtin.fp32 >, builtin.integer i32)> 
+    {
+      ^entry_block2v1(onnx_cast_0_v0: tensor.ranked <2x1 : builtin.integer i1>, onnx_cast_1_v1: tensor.ranked <2x1 : builtin.integer i32>, onnx_cast_2_v2: tensor.ranked <2x1 : builtin.fp32 >, onnx_cast_3_v3: builtin.fp32 ) !0:
+        cast2_out1_v4 = onnx.cast onnx_cast_0_v0 to tensor.ranked <2x1 : builtin.integer i32> {input_is_signed=false,result_is_signed=true} !1;
+        cast3_out1_v5 = onnx.cast onnx_cast_0_v0 to tensor.ranked <2x1 : builtin.fp32 > {input_is_signed=false,result_is_signed=false} !2;
+        cast4_out1_v6 = onnx.cast onnx_cast_1_v1 to tensor.ranked <2x1 : builtin.integer i1> {input_is_signed=true,result_is_signed=false} !3;
+        cast6_out1_v7 = onnx.cast onnx_cast_1_v1 to tensor.ranked <2x1 : builtin.fp32 > {input_is_signed=true,result_is_signed=false} !4;
+        cast7_out1_v8 = onnx.cast onnx_cast_2_v2 to tensor.ranked <2x1 : builtin.integer i1> {input_is_signed=false,result_is_signed=false} !5;
+        cast8_out1_v9 = onnx.cast onnx_cast_2_v2 to tensor.ranked <2x1 : builtin.integer i32> {input_is_signed=false,result_is_signed=true} !6;
+        cast10_out1_v10 = onnx.cast onnx_cast_3_v3 to builtin.integer i32 {input_is_signed=false,result_is_signed=true} !7;
+        onnx.return onnx_cast_0_v0, cast2_out1_v4, cast3_out1_v5, cast4_out1_v6, onnx_cast_1_v1, cast6_out1_v7, cast7_out1_v8, cast8_out1_v9, onnx_cast_2_v2, cast10_out1_v10
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [onnx_cast_0, onnx_cast_1, onnx_cast_2, onnx_cast_3]]
+!1 = [builtin_given_names = builtin.given_names [cast2_out1]]
+!2 = [builtin_given_names = builtin.given_names [cast3_out1]]
+!3 = [builtin_given_names = builtin.given_names [cast4_out1]]
+!4 = [builtin_given_names = builtin.given_names [cast6_out1]]
+!5 = [builtin_given_names = builtin.given_names [cast7_out1]]
+!6 = [builtin_given_names = builtin.given_names [cast8_out1]]
+!7 = [builtin_given_names = builtin.given_names [cast10_out1]]

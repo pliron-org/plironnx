@@ -14,10 +14,19 @@ use plironnx::{
 
 use super::{Backend, common};
 
-pub fn run_plironnx<const D: usize>(
+/// Compile a Burn test fixture with plironnx, run its packed JIT entrypoint,
+/// and return the single f32 output as a Burn tensor for comparison.
+///
+/// `model_path` is relative to Burn's `onnx-tests/tests` directory.
+///
+/// This helper assumes one input and one output.
+/// `output_shape` supplies the expected static dimensions
+/// and may have a different rank from the input.
+pub fn run_plironnx<const INPUT_D: usize, const OUTPUT_D: usize>(
     model_path: &str,
-    input: &Tensor<Backend, D>,
-) -> Tensor<Backend, D> {
+    input: &Tensor<Backend, INPUT_D>,
+    output_shape: [usize; OUTPUT_D],
+) -> Tensor<Backend, OUTPUT_D> {
     let input_data = input.to_data();
     let input_values = input_data
         .as_slice::<f32>()
@@ -25,7 +34,7 @@ pub fn run_plironnx<const D: usize>(
     let shape = input.dims().to_vec();
 
     let graph = parse_onnx_file(common::onnx_tests_dir().join(model_path))
-        .expect("failed to parse constant model");
+        .expect("failed to parse ONNX test model");
     let ctx = &mut Context::new();
     let module = build_module(ctx, &graph, "onnx_module", "model").expect_ok(ctx);
     verify_op(&module, ctx).expect_ok(ctx);
@@ -39,7 +48,7 @@ pub fn run_plironnx<const D: usize>(
     let input_descriptor =
         TensorDesciptor::new(shape, size_of::<f32>(), input_values.as_ptr().cast())
             .build_ir_descriptor();
-    let mut output_descriptor = vec![0u8; (3 + 2 * D) * size_of::<usize>()];
+    let mut output_descriptor = vec![0u8; (3 + 2 * OUTPUT_D) * size_of::<usize>()];
     let inputs = [input_descriptor.as_ptr()];
     let outputs = [output_descriptor.as_mut_ptr()];
     let function = unsafe {
@@ -49,12 +58,16 @@ pub fn run_plironnx<const D: usize>(
     function(inputs.as_ptr(), outputs.as_ptr());
 
     let output_values = unsafe {
-        let descriptor =
-            TensorDesciptor::from_ir_descriptor(output_descriptor.as_ptr(), D, size_of::<f32>());
+        let descriptor = TensorDesciptor::from_ir_descriptor(
+            output_descriptor.as_ptr(),
+            OUTPUT_D,
+            size_of::<f32>(),
+        );
+        assert_eq!(descriptor.sizes(), &output_shape);
         let mut values: Vec<f32> = Vec::new();
         descriptor.copy_to_vec(&mut values);
         values
     };
     Tensor::<Backend, 1>::from_floats(output_values.as_slice(), &Default::default())
-        .reshape(input.dims())
+        .reshape(output_shape)
 }

@@ -3,7 +3,7 @@
 
 //! Build ONNX dialect IR from a topologically ordered burn-onnx graph.
 
-use onnx_ir::{Argument, Node, OnnxGraph, ValueSource};
+use onnx_ir::{Argument, Node, OnnxGraph, ValueSource, node::reshape::ReshapeInput};
 
 use pliron::{
     builtin::{
@@ -20,17 +20,18 @@ use pliron::{
     },
     op::Op,
     result::Result,
-    r#type::TypeHandle,
+    r#type::{TypeHandle, TypedHandle},
     utils::table::HMap,
     value::Value,
 };
 
 use crate::onnx::{
     attributes::constant_value_attr,
-    ops::{AddOp, CastOp, ConstantOp, MulOp, ReturnOp},
+    ops::{AddOp, CastOp, ConstantOp, MulOp, ReshapeOp, ReturnOp},
     types::{arg_type_to_type, is_arg_element_signed},
 };
 use pliron_tensor::tensor::attributes::CastSignednessAttr;
+use pliron_tensor::tensor::types::RankedTensorType;
 
 type OpInserter = IRInserter<DummyListener>;
 
@@ -58,6 +59,8 @@ pub enum FromOnnxGraphErr {
     OptionalInput(String, String),
     #[error("The argument `{0}` must hold a constant, but it has no data")]
     MissingConstantData(String),
+    #[error("The node `{0}` needs a compile-time reshape shape")]
+    DynamicReshapeShape(String),
 }
 
 /// Scoped ONNX names; inner definitions shadow outer ones.
@@ -220,6 +223,24 @@ fn build_node(
                 result_is_signed: is_arg_element_signed(&cast.outputs[0].ty),
             };
             let op = CastOp::new(ctx, input, result_ty, signedness);
+            let result = op.get_result(ctx);
+            ins.append_op(ctx, &op);
+            Ok(vec![result])
+        }
+
+        Node::Reshape(reshape) => {
+            expect_arity(node, reshape.inputs.len(), 2, reshape.outputs.len(), 1)?;
+            if !matches!(reshape.config.shape, ReshapeInput::Static(_)) {
+                return input_err_noloc!(FromOnnxGraphErr::DynamicReshapeShape(
+                    reshape.name.clone()
+                ));
+            }
+            let input = resolve_operand(ctx, ins, scopes, &reshape.inputs[0], &reshape.name)?;
+            let result_ty = TypedHandle::<RankedTensorType>::from_handle(
+                arg_type_to_type(ctx, &reshape.outputs[0].ty)?,
+                ctx,
+            )?;
+            let op = ReshapeOp::new(ctx, input, result_ty);
             let result = op.get_result(ctx);
             ins.append_op(ctx, &op);
             Ok(vec![result])

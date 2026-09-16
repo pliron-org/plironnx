@@ -10,7 +10,7 @@ use pliron::{
         attr_interfaces::TypedAttrInterface,
         op_interfaces::{
             IsTerminatorInterface, NOpdsInterface, NResultsInterface, OneOpdInterface,
-            OneResultInterface,
+            OneResultInterface, OperandNOfType, OperandsMNOfType, ResultNImplsTy, ResultNOfType,
         },
     },
     common_traits::Verify,
@@ -20,13 +20,20 @@ use pliron::{
     operation::Operation,
     printable::Printable,
     result::Result,
-    r#type::{TypeHandle, Typed},
+    r#type::{TypeHandle, Typed, TypedHandle},
     value::Value,
     verify_err, verify_error,
 };
+use pliron_common_dialects::index::types::IndexType;
 use pliron_tensor::{
-    memref::type_interfaces::Dimension,
-    tensor::{attributes::CastSignednessAttr, types::broadcast_shapes},
+    memref::{
+        op_interfaces::{DynamicDimensionOperandsOp, ReshapeOpInterface},
+        type_interfaces::{Dimension, ShapedType},
+    },
+    tensor::{
+        attributes::CastSignednessAttr,
+        types::{RankedTensorType, broadcast_shapes},
+    },
 };
 
 use crate::onnx::types::{value_element_type, value_shape};
@@ -293,6 +300,55 @@ impl Verify for CastOp {
             );
         }
         Ok(())
+    }
+}
+
+/// Reshape a tensor using a compile-time ONNX shape. The inferred result type
+/// contains the resolved dimensions, including any ONNX `-1` dimension.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `input` | The tensor to reshape. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The input tensor's elements arranged in the resolved shape. |
+#[pliron_op(
+    name = "onnx.reshape",
+    format = "$0 ` to ` type($0)",
+    interfaces = [
+        OneOpdInterface,
+        OneResultInterface,
+        OperandNOfType<0, RankedTensorType>,
+        ResultNOfType<0, RankedTensorType>,
+        ResultNImplsTy<0, dyn ShapedType>,
+        OperandsMNOfType<1, {-1}, IndexType>,
+        DynamicDimensionOperandsOp<1>,
+        ReshapeOpInterface<RankedTensorType>,
+    ],
+    verifier = "succ",
+)]
+pub struct ReshapeOp;
+
+impl ReshapeOp {
+    pub fn new(
+        ctx: &mut Context,
+        input: Value,
+        result_type: TypedHandle<RankedTensorType>,
+    ) -> Self {
+        let op = Operation::new(
+            ctx,
+            Self::get_concrete_op_info(),
+            vec![result_type.into()],
+            vec![input],
+            vec![],
+            0,
+        );
+        Self { op }
     }
 }
 

@@ -32,20 +32,20 @@ use pliron_llvm::{
         CastOpInterface, FastMathFlags, FloatBinArithOpWithFastMathFlags,
         IntBinArithOpWithOverflowFlag,
     },
-    ops::{AddOp as LLVMAddOp, FAddOp, FMulOp, FPExtOp, FPTruncOp, MulOp as LLVMMulOp},
+    ops::{AddOp as LLVMAddOp, FAddOp, FMulOp, FPExtOp, FPToSIOp, FPTruncOp, MulOp as LLVMMulOp},
 };
 use pliron_tensor::{
     memref::{attributes::DenseElementsAttr, type_interfaces::ShapedType},
     tensor::{
         ops::{
             AddOp as TensorAddOp, BroadcastOp as TensorBroadcastOp, ConstantOp as TensorConstantOp,
-            ElementwiseCastOp, MulOp as TensorMulOp, SplatOp,
+            ElementwiseCastOp, MulOp as TensorMulOp, ReshapeOp as TensorReshapeOp, SplatOp,
         },
         types::RankedTensorType,
     },
 };
 
-use crate::onnx::ops::{AddOp, CastOp, ConstantOp, MulOp};
+use crate::onnx::ops::{AddOp, CastOp, ConstantOp, MulOp, ReshapeOp};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OnnxToTensorErr {
@@ -61,6 +61,12 @@ pub enum OnnxToTensorErr {
     },
     #[error("cannot lower ONNX cast from {from} to {to}")]
     UnsupportedCast { from: String, to: String },
+}
+
+enum ScalarCastKind {
+    TruncateFloat,
+    ExtendFloat,
+    FloatToSignedInteger,
 }
 
 /// The conversion from the `onnx` dialect to the `tensor` dialect.
@@ -222,7 +228,7 @@ impl ToTensorDialect for CastOp {
             if input_type == result_type {
                 input
             } else {
-                let truncate = {
+                let cast_kind = {
                     let input_type_ref = input_type.deref(ctx);
                     let result_type_ref = result_type.deref(ctx);
                     let input_float = type_cast::<dyn FloatTypeInterface>(&*input_type_ref);
@@ -232,13 +238,19 @@ impl ToTensorDialect for CastOp {
                             if input_float.get_semantics().bits
                                 > result_float.get_semantics().bits =>
                         {
-                            true
+                            ScalarCastKind::TruncateFloat
                         }
                         (Some(input_float), Some(result_float))
                             if input_float.get_semantics().bits
                                 < result_float.get_semantics().bits =>
                         {
-                            false
+                            ScalarCastKind::ExtendFloat
+                        }
+                        (Some(_), None)
+                            if result_type_ref.is::<IntegerType>()
+                                && self.signedness(ctx).result_is_signed =>
+                        {
+                            ScalarCastKind::FloatToSignedInteger
                         }
                         _ => {
                             return Err(input_error!(
@@ -251,22 +263,48 @@ impl ToTensorDialect for CastOp {
                         }
                     }
                 };
-                if truncate {
-                    let op = FPTruncOp::new(ctx, input, result_type);
-                    op.set_fast_math_flags(ctx, FastmathFlagsAttr::default());
-                    let result = op.get_result(ctx);
-                    rewriter.append_op(ctx, &op);
-                    result
-                } else {
-                    let op = FPExtOp::new(ctx, input, result_type);
-                    op.set_fast_math_flags(ctx, FastmathFlagsAttr::default());
-                    let result = op.get_result(ctx);
-                    rewriter.append_op(ctx, &op);
-                    result
+                match cast_kind {
+                    ScalarCastKind::TruncateFloat => {
+                        let op = FPTruncOp::new(ctx, input, result_type);
+                        op.set_fast_math_flags(ctx, FastmathFlagsAttr::default());
+                        let result = op.get_result(ctx);
+                        rewriter.append_op(ctx, &op);
+                        result
+                    }
+                    ScalarCastKind::ExtendFloat => {
+                        let op = FPExtOp::new(ctx, input, result_type);
+                        op.set_fast_math_flags(ctx, FastmathFlagsAttr::default());
+                        let result = op.get_result(ctx);
+                        rewriter.append_op(ctx, &op);
+                        result
+                    }
+                    ScalarCastKind::FloatToSignedInteger => {
+                        let op = FPToSIOp::new(ctx, input, result_type);
+                        let result = op.get_result(ctx);
+                        rewriter.append_op(ctx, &op);
+                        result
+                    }
                 }
             }
         };
         rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![result]);
+        Ok(())
+    }
+}
+
+#[op_interface_impl]
+impl ToTensorDialect for ReshapeOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        let result_type = TypedHandle::from_handle(self.result_type(ctx), ctx)?;
+        require_static_result(ctx, self, result_type)?;
+        let op = TensorReshapeOp::new(ctx, self.get_operand(ctx), vec![], result_type);
+        rewriter.append_op(ctx, &op);
+        rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![op.get_result(ctx)]);
         Ok(())
     }
 }

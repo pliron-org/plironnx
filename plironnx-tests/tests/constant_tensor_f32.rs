@@ -11,8 +11,8 @@ mod constant_tensor_f32_model {
 use burn::tensor::{Device, Tensor};
 
 mod common;
-#[path = "common/constant.rs"]
-mod constant_utils;
+#[path = "common/single_input_f32.rs"]
+mod single_input_f32;
 mod utils;
 
 type Backend = burn::backend::Flex;
@@ -34,6 +34,7 @@ fn constant_tensor_f32() {
     let device: Device<Backend> = Default::default();
     let input = Tensor::<Backend, 2>::from_floats([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], &device);
     let expected = constant_tensor_f32_model::Model::<Backend>::default().forward(input.clone());
-    let actual = constant_utils::run_plironnx("constant/constant_tensor_f32.onnx", &input);
+    let actual =
+        single_input_f32::run_plironnx("constant/constant_tensor_f32.onnx", &input, input.dims());
     actual.to_data().assert_eq(&expected.to_data(), true);
 }

@@ -1,0 +1,12 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <3x4 : builtin.fp32 >) -> (tensor.ranked <3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(input_v0: tensor.ranked <3x4 : builtin.fp32 >) !0:
+        onnx.return input_v0
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [input]]
