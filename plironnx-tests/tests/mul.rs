@@ -22,10 +22,6 @@ mod utils;
 
 type Backend = burn::backend::Flex;
 
-fn run_reference(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
-    mul_model::Model::<Backend>::default().forward(input, scalar)
-}
-
 fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
     let input_data = input.to_data();
     let input_values = input_data
@@ -97,7 +93,7 @@ fn mul_scalar_with_tensor_and_tensor_with_tensor() {
         &device,
     );
     let scalar = 6.0f64;
-    let expected = run_reference(input.clone(), scalar);
+    let expected = mul_model::Model::<Backend>::default().forward(input.clone(), scalar);
     let actual = run_plironnx(input, scalar);
     actual.to_data().assert_eq(&expected.to_data(), true);
 }

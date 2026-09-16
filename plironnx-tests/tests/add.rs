@@ -22,12 +22,6 @@ mod utils;
 
 type Backend = burn::backend::Flex;
 
-/// Reference execution: generated model from burn.
-fn run_reference(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
-    let model = add_model::Model::<Backend>::default();
-    model.forward(input, scalar)
-}
-
 fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
     let input_data = input.to_data();
     let input_values = input_data
@@ -105,7 +99,7 @@ fn add() {
     );
     let scalar = 2f64;
 
-    let expected = run_reference(input.clone(), scalar);
+    let expected = add_model::Model::<Backend>::default().forward(input.clone(), scalar);
     let actual = run_plironnx(input, scalar);
 
     actual.to_data().assert_eq(&expected.to_data(), true);

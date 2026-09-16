@@ -1,0 +1,16 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x3x4 : builtin.fp32 >) -> (tensor.ranked <2x3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(x_v0: tensor.ranked <2x3x4 : builtin.fp32 >) !0:
+        constant1_out1_v1 = onnx.constant <memref.dense_elements <tensor.ranked <1 : builtin.fp32 > = splat 2>> : tensor.ranked <1 : builtin.fp32 > !1;
+        add1_out1_v2 = onnx.add x_v0, constant1_out1_v1 : tensor.ranked <2x3x4 : builtin.fp32 > !2;
+        onnx.return add1_out1_v2
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [x]]
+!1 = [builtin_given_names = builtin.given_names [constant1_out1]]
+!2 = [builtin_given_names = builtin.given_names [add1_out1]]

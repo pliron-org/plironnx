@@ -1,0 +1,142 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    llvm.func @model: llvm.func <llvm.void (llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>, llvm.ptr (0)) variadic = false>
+      [] 
+    {
+      ^entry_block2v1(input_v0: llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>, v5: llvm.ptr (0)) !0:
+        v8 = llvm.addressof @__constant_2x3xfp32_4B_0 : llvm.ptr (0);
+        v110 = llvm.constant <builtin.integer <2: i64>> : builtin.integer i64;
+        v111 = llvm.constant <builtin.integer <3: i64>> : builtin.integer i64;
+        v112 = llvm.constant <builtin.integer <1: i64>> : builtin.integer i64;
+        v113 = llvm.constant <builtin.integer <3: i64>> : builtin.integer i64;
+        v114 = llvm.constant <builtin.integer <6: i64>> : builtin.integer i64;
+        v115 = llvm.constant <builtin.integer <0: i64>> : builtin.integer i64;
+        v15 = llvm.undef : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v16 = llvm.insert_value v15[0], v8 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v17 = llvm.insert_value v16[1], v8 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v18 = llvm.insert_value v17[2], v115 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v19 = llvm.undef : llvm.array [2 x builtin.integer i64];
+        v20 = llvm.insert_value v19[0], v110 : llvm.array [2 x builtin.integer i64];
+        v21 = llvm.insert_value v20[1], v111 : llvm.array [2 x builtin.integer i64];
+        v22 = llvm.insert_value v18[3], v21 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v23 = llvm.undef : llvm.array [2 x builtin.integer i64];
+        v24 = llvm.insert_value v23[0], v113 : llvm.array [2 x builtin.integer i64];
+        v25 = llvm.insert_value v24[1], v112 : llvm.array [2 x builtin.integer i64];
+        constant1_out1_v26 = llvm.insert_value v22[4], v25 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked> !1;
+        v116 = llvm.constant <builtin.integer <2: i64>> : builtin.integer i64;
+        v117 = llvm.constant <builtin.integer <3: i64>> : builtin.integer i64;
+        v118 = llvm.constant <builtin.integer <1: i64>> : builtin.integer i64;
+        v119 = llvm.constant <builtin.integer <3: i64>> : builtin.integer i64;
+        v120 = llvm.constant <builtin.integer <6: i64>> : builtin.integer i64;
+        v32 = llvm.zero : llvm.ptr (0);
+        v33 = llvm.gep <builtin.fp32 > (v32)[Constant(1)] : llvm.ptr (0);
+        v34 = llvm.ptrtoint v33 to builtin.integer i64;
+        v35 = llvm.mul v34, v120 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v36 = llvm.call @malloc (v35) : llvm.func <llvm.ptr (0)(builtin.integer i64) variadic = false>;
+        v121 = llvm.constant <builtin.integer <0: i64>> : builtin.integer i64;
+        v38 = llvm.undef : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v39 = llvm.insert_value v38[0], v36 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v40 = llvm.insert_value v39[1], v36 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v41 = llvm.insert_value v40[2], v121 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v42 = llvm.undef : llvm.array [2 x builtin.integer i64];
+        v43 = llvm.insert_value v42[0], v116 : llvm.array [2 x builtin.integer i64];
+        v44 = llvm.insert_value v43[1], v117 : llvm.array [2 x builtin.integer i64];
+        v45 = llvm.insert_value v41[3], v44 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v46 = llvm.undef : llvm.array [2 x builtin.integer i64];
+        v47 = llvm.insert_value v46[0], v119 : llvm.array [2 x builtin.integer i64];
+        v48 = llvm.insert_value v47[1], v118 : llvm.array [2 x builtin.integer i64];
+        add1_out1_v49 = llvm.insert_value v45[4], v48 : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked> !2;
+        v50 = llvm.extract_value add1_out1_v49[3] : llvm.array [2 x builtin.integer i64];
+        v51 = llvm.extract_value v50[0] : builtin.integer i64;
+        v52 = llvm.extract_value v50[1] : builtin.integer i64;
+        v106 = llvm.constant <builtin.integer <0: i64>> : builtin.integer i64;
+        v107 = llvm.constant <builtin.integer <1: i64>> : builtin.integer i64;
+        llvm.br ^for_op_header_block9v1(v106)
+
+      ^for_op_header_block9v1(v125: builtin.integer i64):
+        v126 = llvm.icmp v125 <ULT> v51 : builtin.integer i1;
+        llvm.cond_br if v126 ^entry_block5v1(v125) else ^entry_split_block8v1()
+
+      ^entry_block5v1(iv_v109: builtin.integer i64) !3:
+        llvm.br ^for_op_header_block7v1(v106)
+
+      ^for_op_header_block7v1(v122: builtin.integer i64):
+        v123 = llvm.icmp v122 <ULT> v52 : builtin.integer i1;
+        llvm.cond_br if v123 ^entry_block4v1(v122) else ^entry_split_block6v1()
+
+      ^entry_block4v1(iv_v108: builtin.integer i64) !4:
+        llvm.br ^entry_block3v1(iv_v109, iv_v108)
+
+      ^entry_block3v1(v55: builtin.integer i64, v56: builtin.integer i64):
+        v60 = llvm.extract_value input_v0[1] : llvm.ptr (0);
+        v61 = llvm.extract_value input_v0[4] : llvm.array [2 x builtin.integer i64];
+        v62 = llvm.extract_value v61[0] : builtin.integer i64;
+        v63 = llvm.extract_value v61[1] : builtin.integer i64;
+        v64 = llvm.extract_value input_v0[2] : builtin.integer i64;
+        v65 = llvm.gep <builtin.fp32 > (v60, v64)[OperandIdx(1)] : llvm.ptr (0);
+        v66 = llvm.mul v62, v55 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v67 = llvm.mul v63, v56 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v68 = llvm.add v67, v66 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v69 = llvm.gep <builtin.fp32 > (v65, v68)[OperandIdx(1)] : llvm.ptr (0);
+        v70 = llvm.load v69  : builtin.fp32 ;
+        v71 = llvm.extract_value constant1_out1_v26[1] : llvm.ptr (0);
+        v72 = llvm.extract_value constant1_out1_v26[4] : llvm.array [2 x builtin.integer i64];
+        v73 = llvm.extract_value v72[0] : builtin.integer i64;
+        v74 = llvm.extract_value v72[1] : builtin.integer i64;
+        v75 = llvm.extract_value constant1_out1_v26[2] : builtin.integer i64;
+        v76 = llvm.gep <builtin.fp32 > (v71, v75)[OperandIdx(1)] : llvm.ptr (0);
+        v77 = llvm.mul v73, v55 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v78 = llvm.mul v74, v56 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v79 = llvm.add v78, v77 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v80 = llvm.gep <builtin.fp32 > (v76, v79)[OperandIdx(1)] : llvm.ptr (0);
+        v81 = llvm.load v80  : builtin.fp32 ;
+        v59 = llvm.fadd <> v70, v81 : builtin.fp32 ;
+        v82 = llvm.extract_value add1_out1_v49[1] : llvm.ptr (0);
+        v83 = llvm.extract_value add1_out1_v49[4] : llvm.array [2 x builtin.integer i64];
+        v84 = llvm.extract_value v83[0] : builtin.integer i64;
+        v85 = llvm.extract_value v83[1] : builtin.integer i64;
+        v86 = llvm.extract_value add1_out1_v49[2] : builtin.integer i64;
+        v87 = llvm.gep <builtin.fp32 > (v82, v86)[OperandIdx(1)] : llvm.ptr (0);
+        v88 = llvm.mul v84, v55 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v89 = llvm.mul v85, v56 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v90 = llvm.add v89, v88 <{nsw=false,nuw=false}>: builtin.integer i64;
+        v91 = llvm.gep <builtin.fp32 > (v87, v90)[OperandIdx(1)] : llvm.ptr (0);
+        llvm.store *v91 <- v59 ;
+        v124 = llvm.add iv_v108, v107 <{nsw=false,nuw=false}>: builtin.integer i64;
+        llvm.br ^for_op_header_block7v1(v124)
+
+      ^entry_split_block6v1():
+        v127 = llvm.add iv_v109, v107 <{nsw=false,nuw=false}>: builtin.integer i64;
+        llvm.br ^for_op_header_block9v1(v127)
+
+      ^entry_split_block8v1():
+        llvm.store *v5 <- add1_out1_v49 ;
+        llvm.return 
+    };
+    llvm.global @__constant_2x3xfp32_4B_0 : llvm.array [24 x builtin.integer i8]
+      [llvm_global_constant: builtin.bool true, llvm_alignment: llvm.align 4, llvm_global_linkage: llvm.linkage PrivateLinkage] = !outlined !5;
+    llvm.func @malloc: llvm.func <llvm.ptr (0)(builtin.integer i64) variadic = false>
+      [];
+    llvm.func @main: llvm.func <llvm.void (llvm.ptr (0), llvm.ptr (0)) variadic = false>
+      [] 
+    {
+      ^entry_block10v1(v128: llvm.ptr (0), v129: llvm.ptr (0)):
+        v130 = llvm.gep <llvm.ptr (0)> (v128)[Constant(0)] : llvm.ptr (0);
+        v131 = llvm.load v130  : llvm.ptr (0);
+        v132 = llvm.load v131  : llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>;
+        v133 = llvm.gep <llvm.ptr (0)> (v129)[Constant(0)] : llvm.ptr (0);
+        v134 = llvm.load v133  : llvm.ptr (0);
+        v135 = llvm.call @model (v132, v134) : llvm.func <llvm.void (llvm.struct <{ llvm.ptr (0), llvm.ptr (0), builtin.integer i64, llvm.array [2 x builtin.integer i64], llvm.array [2 x builtin.integer i64] } : Unpacked>, llvm.ptr (0)) variadic = false>;
+        llvm.return 
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [input]]
+!1 = [builtin_given_names = builtin.given_names [constant1_out1]]
+!2 = [builtin_given_names = builtin.given_names [add1_out1]]
+!3 = [builtin_given_names = builtin.given_names [iv]]
+!4 = [builtin_given_names = builtin.given_names [iv]]
+!5 = [llvm_global_initializer = !6]
+!6 = llvm.bytes [0, 0, 192, 63, 0, 0, 32, 64, 0, 0, 96, 64, 0, 0, 144, 64, 0, 0, 176, 64, 0, 0, 208, 64]
