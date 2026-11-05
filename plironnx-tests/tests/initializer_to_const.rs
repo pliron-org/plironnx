@@ -15,8 +15,6 @@ mod common;
 mod single_input_f32;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
 #[test]
 fn initializer_to_const_ir() {
     utils::assert_ir_snapshots(
@@ -31,9 +29,9 @@ fn initializer_to_const_ir() {
 
 #[test]
 fn initializer_to_const() {
-    let device: Device<Backend> = Default::default();
-    let input = Tensor::<Backend, 2>::from_floats([[1., 1., 1.], [1., 1., 1.]], &device);
-    let expected = initializer_to_const_model::Model::<Backend>::default().forward(input.clone());
+    let device: Device = Default::default();
+    let input = Tensor::<2>::from_floats([[1., 1., 1.], [1., 1., 1.]], &device);
+    let expected = initializer_to_const_model::Model::default().forward(input.clone());
     let actual = single_input_f32::run_plironnx(
         "initializer_to_const/initializer_to_const.onnx",
         &input,

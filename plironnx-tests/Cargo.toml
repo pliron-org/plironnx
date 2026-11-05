@@ -7,11 +7,11 @@ license.workspace = true
 publish = false
 
 [dev-dependencies]
-burn = { version = "0.21.0", features = ["flex", "std"] }
-burn-store = { version = "0.21.0", features = ["std", "burnpack"] }
+burn = { version = "0.22.0", features = ["flex", "std"] }
+burn-store = { version = "0.22.0", features = ["std"] }
 cargo_metadata = "0.23.1"
 expect-test = "1"
-onnx-tests = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-tests", tag = "v0.21.0" }
+onnx-tests = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-tests", tag = "v0.22.0" }
 pliron.workspace = true
 pliron-common-dialects.workspace = true
 pliron-llvm.workspace = true
@@ -19,5 +19,5 @@ pliron-tensor.workspace = true
 plironnx = { path = ".." }
 
 [build-dependencies]
-burn-onnx = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "burn-onnx", tag = "v0.21.0" }
+burn-onnx = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "burn-onnx", tag = "v0.22.0" }
 cargo_metadata = "0.23.1"

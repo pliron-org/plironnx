@@ -20,14 +20,12 @@ use plironnx::{
 mod common;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
 fn run_broadcast_plironnx(
-    x_3d: &Tensor<Backend, 3>,
-    y_2d: &Tensor<Backend, 2>,
-    a_2d: &Tensor<Backend, 2>,
-    b_3d: &Tensor<Backend, 3>,
-) -> (Tensor<Backend, 3>, Tensor<Backend, 3>) {
+    x_3d: &Tensor<3>,
+    y_2d: &Tensor<2>,
+    a_2d: &Tensor<2>,
+    b_3d: &Tensor<3>,
+) -> (Tensor<3>, Tensor<3>) {
     let input_data = [
         x_3d.to_data(),
         y_2d.to_data(),
@@ -76,7 +74,7 @@ fn run_broadcast_plironnx(
             TensorDesciptor::from_ir_descriptor(descriptor.as_ptr(), 3, size_of::<f32>());
         let mut values: Vec<f32> = Vec::new();
         descriptor.copy_to_vec(&mut values);
-        Tensor::<Backend, 1>::from_floats(values.as_slice(), &Default::default()).reshape([2, 3, 4])
+        Tensor::<1>::from_floats(values.as_slice(), &Default::default()).reshape([2, 3, 4])
     };
     (
         read_output(&output1_descriptor),
@@ -98,30 +96,30 @@ fn mul_broadcast_ir() {
 
 #[test]
 fn mul_broadcast_tensor_ranks() {
-    let device: Device<Backend> = Default::default();
-    let x_3d = Tensor::<Backend, 3>::from_floats(
+    let device: Device = Default::default();
+    let x_3d = Tensor::<3>::from_floats(
         [
             [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]],
             [[2., 3., 4., 5.], [6., 7., 8., 9.], [10., 11., 12., 13.]],
         ],
         &device,
     );
-    let y_2d = Tensor::<Backend, 2>::from_floats(
+    let y_2d = Tensor::<2>::from_floats(
         [[2., 2., 2., 2.], [3., 3., 3., 3.], [4., 4., 4., 4.]],
         &device,
     );
-    let a_2d = Tensor::<Backend, 2>::from_floats(
+    let a_2d = Tensor::<2>::from_floats(
         [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]],
         &device,
     );
-    let b_3d = Tensor::<Backend, 3>::from_floats(
+    let b_3d = Tensor::<3>::from_floats(
         [
             [[2., 2., 2., 2.], [1., 1., 1., 1.], [0.5, 0.5, 0.5, 0.5]],
             [[3., 3., 3., 3.], [2., 2., 2., 2.], [1., 1., 1., 1.]],
         ],
         &device,
     );
-    let expected = mul_broadcast_model::Model::<Backend>::default().forward(
+    let expected = mul_broadcast_model::Model::default().forward(
         x_3d.clone(),
         y_2d.clone(),
         a_2d.clone(),

@@ -28,7 +28,7 @@ pliron.workspace = true
 pliron-llvm.workspace = true
 pliron-common-dialects.workspace = true
 pliron-tensor.workspace = true
-onnx-ir = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-ir", tag = "v0.21.0" }
+onnx-ir = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-ir", tag = "v0.22.0" }
 
 thiserror = "2"
 log = { version = "0" }

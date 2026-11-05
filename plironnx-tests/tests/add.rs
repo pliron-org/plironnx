@@ -20,9 +20,7 @@ use plironnx::{
 mod common;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
-fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
+fn run_plironnx(input: Tensor<4>, scalar: f64) -> Tensor<4> {
     let input_data = input.to_data();
     let input_values = input_data
         .as_slice::<f32>()
@@ -63,8 +61,7 @@ fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
         values
     };
     let output_values = read_output(&output_descriptor);
-    Tensor::<Backend, 1>::from_floats(output_values.as_slice(), &Default::default())
-        .reshape([1, 2, 3, 4])
+    Tensor::<1>::from_floats(output_values.as_slice(), &Default::default()).reshape([1, 2, 3, 4])
 }
 
 #[test]
@@ -81,12 +78,12 @@ fn add_ir() {
 
 #[test]
 fn add() {
-    let device: Device<Backend> = Default::default();
+    let device: Device = Default::default();
 
     // The ONNX model declares a [1, 2, 3, 4] input. Burn accepts the smaller
     // [1, 1, 1, 4] value used by its importer test, but compiled static shapes
     // require the model's declared dimensions.
-    let input = Tensor::<Backend, 4>::from_floats(
+    let input = Tensor::<4>::from_floats(
         [[
             [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]],
             [
@@ -99,7 +96,7 @@ fn add() {
     );
     let scalar = 2f64;
 
-    let expected = add_model::Model::<Backend>::default().forward(input.clone(), scalar);
+    let expected = add_model::Model::default().forward(input.clone(), scalar);
     let actual = run_plironnx(input, scalar);
 
     actual.to_data().assert_eq(&expected.to_data(), true);

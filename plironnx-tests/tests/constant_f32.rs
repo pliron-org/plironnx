@@ -15,8 +15,6 @@ mod common;
 mod single_input_f32;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
 #[test]
 fn constant_f32_ir() {
     utils::assert_ir_snapshots(
@@ -31,9 +29,9 @@ fn constant_f32_ir() {
 
 #[test]
 fn constant_f32() {
-    let device: Device<Backend> = Default::default();
-    let input = Tensor::<Backend, 3>::zeros([2, 3, 4], &device);
-    let expected = constant_f32_model::Model::<Backend>::default().forward(input.clone());
+    let device: Device = Default::default();
+    let input = Tensor::<3>::zeros([2, 3, 4], &device);
+    let expected = constant_f32_model::Model::default().forward(input.clone());
     let actual = single_input_f32::run_plironnx("constant/constant_f32.onnx", &input, input.dims());
     actual.to_data().assert_eq(&expected.to_data(), true);
 }

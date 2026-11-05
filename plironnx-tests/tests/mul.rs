@@ -20,9 +20,7 @@ use plironnx::{
 mod common;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
-fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
+fn run_plironnx(input: Tensor<4>, scalar: f64) -> Tensor<4> {
     let input_data = input.to_data();
     let input_values = input_data
         .as_slice::<f32>()
@@ -62,8 +60,7 @@ fn run_plironnx(input: Tensor<Backend, 4>, scalar: f64) -> Tensor<Backend, 4> {
         descriptor.copy_to_vec(&mut values);
         values
     };
-    Tensor::<Backend, 1>::from_floats(output_values.as_slice(), &Default::default())
-        .reshape([1, 2, 3, 4])
+    Tensor::<1>::from_floats(output_values.as_slice(), &Default::default()).reshape([1, 2, 3, 4])
 }
 
 #[test]
@@ -80,8 +77,8 @@ fn mul_ir() {
 
 #[test]
 fn mul_scalar_with_tensor_and_tensor_with_tensor() {
-    let device: Device<Backend> = Default::default();
-    let input = Tensor::<Backend, 4>::from_floats(
+    let device: Device = Default::default();
+    let input = Tensor::<4>::from_floats(
         [[
             [[1., 2., 3., 4.], [5., 6., 7., 8.], [9., 10., 11., 12.]],
             [
@@ -93,7 +90,7 @@ fn mul_scalar_with_tensor_and_tensor_with_tensor() {
         &device,
     );
     let scalar = 6.0f64;
-    let expected = mul_model::Model::<Backend>::default().forward(input.clone(), scalar);
+    let expected = mul_model::Model::default().forward(input.clone(), scalar);
     let actual = run_plironnx(input, scalar);
     actual.to_data().assert_eq(&expected.to_data(), true);
 }

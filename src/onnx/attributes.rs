@@ -81,12 +81,12 @@ fn checked_bytes(
     num_elements: usize,
     ty: TypeHandle,
 ) -> Result<Vec<u8>> {
-    let dtype_size = data.dtype.size();
+    let dtype_size = data.dtype().size();
 
     let bytes = data.as_bytes();
     if dtype_size != element_size || bytes.len() != num_elements * element_size {
         return input_err_noloc!(ConstantDataErr::DTypeSizeMismatch {
-            dtype: format!("{:?}", data.dtype),
+            dtype: format!("{:?}", data.dtype()),
             ty: ty.disp(ctx).to_string(),
             expected: num_elements * element_size,
             got: bytes.len(),

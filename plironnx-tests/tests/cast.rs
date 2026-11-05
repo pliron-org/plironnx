@@ -20,8 +20,6 @@ use plironnx::{
 mod common;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
 fn read_tensor_output<T: Copy>(descriptor: &[u8]) -> Vec<T> {
     unsafe {
         let descriptor =
@@ -47,14 +45,13 @@ fn cast_ir() {
 
 #[test]
 fn cast() {
-    let device: Device<Backend> = Default::default();
-    let input_bool =
-        Tensor::<Backend, 2, Bool>::from_bool(TensorData::from([[true], [true]]), &device);
-    let input_int = Tensor::<Backend, 2, Int>::from_ints([[1], [1]], &device);
-    let input_float = Tensor::<Backend, 2>::from_floats([[1f32], [1.]], &device);
+    let device: Device = Default::default();
+    let input_bool = Tensor::<2, Bool>::from_bool(TensorData::from([[true], [true]]), &device);
+    let input_int = Tensor::<2, Int>::from_ints([[1], [1]], &device);
+    let input_float = Tensor::<2>::from_floats([[1f32], [1.]], &device);
     let input_scalar = 1f32;
 
-    let expected = cast_model::Model::<Backend>::new(&device).forward(
+    let expected = cast_model::Model::new(&device).forward(
         input_bool.clone(),
         input_int.clone(),
         input_float.clone(),

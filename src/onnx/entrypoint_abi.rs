@@ -89,7 +89,12 @@ pub fn compile_packed_entrypoint(
     verify_op(&module, ctx)?;
 
     let llvm_ctx = LLVMContext::default();
-    let llvm_module = pliron_llvm::to_llvm_ir::convert_module(ctx, &llvm_ctx, module)?;
+    let llvm_module = pliron_llvm::to_llvm_ir::convert_module(
+        ctx,
+        &llvm_ctx,
+        module,
+        pliron_llvm::to_llvm_ir::ToLLVMOptions::default(),
+    )?;
     Ok((llvm_ctx, llvm_module, abi))
 }
 

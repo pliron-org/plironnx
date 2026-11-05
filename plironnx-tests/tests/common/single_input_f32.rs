@@ -12,7 +12,7 @@ use plironnx::{
     onnx::{entrypoint_abi::compile_packed_entrypoint, from_onnx_graph::build_module},
 };
 
-use super::{Backend, common};
+use super::common;
 
 /// Compile a Burn test fixture with plironnx, run its packed JIT entrypoint,
 /// and return the single f32 output as a Burn tensor for comparison.
@@ -24,9 +24,9 @@ use super::{Backend, common};
 /// and may have a different rank from the input.
 pub fn run_plironnx<const INPUT_D: usize, const OUTPUT_D: usize>(
     model_path: &str,
-    input: &Tensor<Backend, INPUT_D>,
+    input: &Tensor<INPUT_D>,
     output_shape: [usize; OUTPUT_D],
-) -> Tensor<Backend, OUTPUT_D> {
+) -> Tensor<OUTPUT_D> {
     let input_data = input.to_data();
     let input_values = input_data
         .as_slice::<f32>()
@@ -68,6 +68,5 @@ pub fn run_plironnx<const INPUT_D: usize, const OUTPUT_D: usize>(
         descriptor.copy_to_vec(&mut values);
         values
     };
-    Tensor::<Backend, 1>::from_floats(output_values.as_slice(), &Default::default())
-        .reshape(output_shape)
+    Tensor::<1>::from_floats(output_values.as_slice(), &Default::default()).reshape(output_shape)
 }

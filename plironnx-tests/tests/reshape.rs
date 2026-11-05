@@ -15,8 +15,6 @@ mod common;
 mod single_input_f32;
 mod utils;
 
-type Backend = burn::backend::Flex;
-
 #[test]
 fn reshape_ir() {
     utils::assert_ir_snapshots(
@@ -31,9 +29,9 @@ fn reshape_ir() {
 
 #[test]
 fn reshape() {
-    let device: Device<Backend> = Default::default();
-    let input = Tensor::<Backend, 1>::from_floats([0., 1., 2., 3.], &device);
-    let expected = reshape_model::Model::<Backend>::new(&device).forward(input.clone());
+    let device: Device = Default::default();
+    let input = Tensor::<1>::from_floats([0., 1., 2., 3.], &device);
+    let expected = reshape_model::Model::new(&device).forward(input.clone());
     let actual = single_input_f32::run_plironnx("reshape/reshape.onnx", &input, [1, 4]);
     actual.to_data().assert_eq(&expected.to_data(), true);
 }
