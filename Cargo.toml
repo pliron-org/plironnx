@@ -31,7 +31,10 @@ pliron-tensor.workspace = true
 onnx-ir = { git = "https://github.com/tracel-ai/burn-onnx.git", package = "onnx-ir", tag = "v0.22.0" }
 
 thiserror = "2"
-log = { version = "0" }
-rustc-hash = "2"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0"
+
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/pliron-org/pliron.git", branch = "master", pattern = "lints/pliron_lints" },
+]

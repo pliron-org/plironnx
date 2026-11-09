@@ -14,7 +14,7 @@ use pliron::{
         },
     },
     common_traits::Verify,
-    context::{Context, Ptr},
+    context::Context,
     derive::{op_interface, pliron_op},
     op::{Op, op_cast},
     operation::Operation,
@@ -67,15 +67,7 @@ impl ConstantOp {
     /// Create a new ONNX constant.
     pub fn new(ctx: &mut Context, value: Box<dyn TypedAttrInterface>) -> Self {
         let result_type = value.get_type(ctx);
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![result_type],
-            vec![],
-            vec![],
-            0,
-        );
-        let op = ConstantOp { op };
+        let op = Operation::new_op::<Self>(ctx, vec![result_type], vec![], vec![], 0);
         op.set_attr_onnx_constant_value(ctx, value);
         op
     }
@@ -164,9 +156,7 @@ pub struct AddOp;
 
 impl AddOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        AddOp {
-            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
-        }
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![lhs, rhs], vec![], 0)
     }
 }
 
@@ -185,9 +175,7 @@ pub struct SubOp;
 
 impl SubOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        SubOp {
-            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
-        }
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![lhs, rhs], vec![], 0)
     }
 }
 
@@ -206,9 +194,7 @@ pub struct MulOp;
 
 impl MulOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        MulOp {
-            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
-        }
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![lhs, rhs], vec![], 0)
     }
 }
 
@@ -228,27 +214,8 @@ pub struct DivOp;
 
 impl DivOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        DivOp {
-            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
-        }
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![lhs, rhs], vec![], 0)
     }
-}
-
-/// Create the operation of a binary op `T` with no attributes and no regions.
-fn new_binary_operation<T: Op>(
-    ctx: &mut Context,
-    lhs: Value,
-    rhs: Value,
-    result_type: TypeHandle,
-) -> Ptr<Operation> {
-    Operation::new(
-        ctx,
-        T::get_concrete_op_info(),
-        vec![result_type],
-        vec![lhs, rhs],
-        vec![],
-        0,
-    )
 }
 
 /// Matrix product with NumPy semantics, as defined by ONNX `MatMul`.
@@ -314,9 +281,7 @@ impl MatMulOp {
         rhs: Value,
         result_type: TypedHandle<RankedTensorType>,
     ) -> Self {
-        MatMulOp {
-            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type.into()),
-        }
+        Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![lhs, rhs], vec![], 0)
     }
 
     pub fn lhs(&self, ctx: &Context) -> Value {
@@ -497,15 +462,7 @@ impl CastOp {
         result_type: TypeHandle,
         signedness: CastSignednessAttr,
     ) -> Self {
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![result_type],
-            vec![input],
-            vec![],
-            0,
-        );
-        let op = CastOp { op };
+        let op = Operation::new_op::<Self>(ctx, vec![result_type], vec![input], vec![], 0);
         op.set_attr_onnx_cast_signedness(ctx, signedness);
         op
     }
@@ -582,15 +539,7 @@ impl ReshapeOp {
         input: Value,
         result_type: TypedHandle<RankedTensorType>,
     ) -> Self {
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![result_type.into()],
-            vec![input],
-            vec![],
-            0,
-        );
-        Self { op }
+        Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![input], vec![], 0)
     }
 }
 
@@ -611,15 +560,7 @@ pub struct ReturnOp;
 
 impl ReturnOp {
     pub fn new(ctx: &mut Context, outputs: Vec<Value>) -> Self {
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![],
-            outputs,
-            vec![],
-            0,
-        );
-        ReturnOp { op }
+        Operation::new_op::<Self>(ctx, vec![], outputs, vec![], 0)
     }
 }
 
