@@ -1,0 +1,21 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x2x3x4 : builtin.fp32 >, builtin.fp64 , builtin.fp64 ) -> (tensor.ranked <1x2x3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(onnx_div_0_v0: tensor.ranked <1x2x3x4 : builtin.fp32 >, onnx_cast_1_v1: builtin.fp64 , onnx_cast_2_v2: builtin.fp64 ) !0:
+        cast1_out1_v7 = llvm.fptrunc <> onnx_cast_1_v1 to builtin.fp32  !1;
+        cast2_out1_v8 = llvm.fptrunc <> onnx_cast_2_v2 to builtin.fp32  !2;
+        div1_out1_v9 = llvm.fdiv <> cast1_out1_v7, cast2_out1_v8 : builtin.fp32  !3;
+        v10 = tensor.splat div1_out1_v9 : tensor.ranked <1x2x3x4 : builtin.fp32 >;
+        div2_out1_v11 = tensor.div onnx_div_0_v0, v10 : tensor.ranked <1x2x3x4 : builtin.fp32 > !4;
+        onnx.return div2_out1_v11
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [onnx_div_0, onnx_cast_1, onnx_cast_2]]
+!1 = [builtin_given_names = builtin.given_names [cast1_out1]]
+!2 = [builtin_given_names = builtin.given_names [cast2_out1]]
+!3 = [builtin_given_names = builtin.given_names [div1_out1]]
+!4 = [builtin_given_names = builtin.given_names [div2_out1]]

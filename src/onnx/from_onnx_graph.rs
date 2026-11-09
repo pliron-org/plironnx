@@ -7,6 +7,7 @@ use onnx_ir::{Argument, Node, OnnxGraph, ValueSource, node::reshape::ReshapeInpu
 
 use pliron::{
     builtin::{
+        attributes::TypeAttr,
         op_interfaces::{OneResultInterface, SingleBlockRegionInterface},
         ops::{FuncOp, ModuleOp},
         types::FunctionType,
@@ -19,19 +20,24 @@ use pliron::{
         listener::DummyListener,
     },
     op::Op,
+    printable::Printable,
     result::Result,
-    r#type::{TypeHandle, TypedHandle},
+    r#type::{TypeHandle, Typed, TypedHandle},
     utils::table::HMap,
     value::Value,
 };
 
 use crate::onnx::{
     attributes::constant_value_attr,
-    ops::{AddOp, CastOp, ConstantOp, MulOp, ReshapeOp, ReturnOp},
-    types::{arg_type_to_type, is_arg_element_signed},
+    ops::{
+        AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReshapeOp, ReturnOp, SubOp,
+        matmul_shapes,
+    },
+    types::{arg_type_to_type, is_arg_element_signed, is_arg_element_unsigned, value_shape},
 };
+use pliron_tensor::memref::type_interfaces::{Dimension, MultiDimensionalType, ShapedType};
 use pliron_tensor::tensor::attributes::CastSignednessAttr;
-use pliron_tensor::tensor::types::RankedTensorType;
+use pliron_tensor::tensor::types::{RankedTensorType, broadcast_shapes};
 
 type OpInserter = IRInserter<DummyListener>;
 
@@ -61,6 +67,16 @@ pub enum FromOnnxGraphErr {
     MissingConstantData(String),
     #[error("The node `{0}` needs a compile-time reshape shape")]
     DynamicReshapeShape(String),
+    #[error("The node `{0}` divides unsigned integers, which is not supported")]
+    UnsignedIntegerDiv(String),
+    #[error(
+        "The node `{node}` declares a result extent {declared}, but its operands give {inferred}"
+    )]
+    ShapeConflict {
+        node: String,
+        declared: String,
+        inferred: String,
+    },
 }
 
 /// Scoped ONNX names; inner definitions shadow outer ones.
@@ -129,13 +145,8 @@ pub fn build_func(ctx: &mut Context, graph: &OnnxGraph, func_name: &str) -> Resu
         .iter()
         .map(|input| arg_type_to_type(ctx, &input.ty))
         .collect::<Result<Vec<TypeHandle>>>()?;
-    let result_types = graph
-        .outputs
-        .iter()
-        .map(|output| arg_type_to_type(ctx, &output.ty))
-        .collect::<Result<Vec<TypeHandle>>>()?;
-
-    let func_ty = FunctionType::get(ctx, arg_types, result_types);
+    // We don't set the result types until a little later, when the graph outputs are known.
+    let func_ty = FunctionType::get(ctx, arg_types.clone(), vec![]);
     let func = FuncOp::new(ctx, to_identifier(func_name)?, func_ty);
 
     let entry = func.get_entry_block(ctx);
@@ -155,6 +166,10 @@ pub fn build_func(ctx: &mut Context, graph: &OnnxGraph, func_name: &str) -> Resu
         .iter()
         .map(|output| resolve_operand(ctx, &mut ins, &mut scopes, output, "<graph output>"))
         .collect::<Result<Vec<Value>>>()?;
+    // Compute the result types now, from the outputs' refined types.
+    let result_types = outputs.iter().map(|output| output.get_type(ctx)).collect();
+    let func_ty = FunctionType::get(ctx, arg_types, result_types);
+    func.set_attr_builtin_func_type(ctx, TypeAttr::new(func_ty.into()));
     let ret = ReturnOp::new(ctx, outputs);
     ins.append_op(ctx, &ret);
 
@@ -192,23 +207,64 @@ fn build_node(
             Ok(vec![value])
         }
 
-        Node::Add(add) => {
-            expect_arity(node, add.inputs.len(), 2, add.outputs.len(), 1)?;
-            let lhs = resolve_operand(ctx, ins, scopes, &add.inputs[0], &add.name)?;
-            let rhs = resolve_operand(ctx, ins, scopes, &add.inputs[1], &add.name)?;
-            let result_ty = arg_type_to_type(ctx, &add.outputs[0].ty)?;
-            let op = AddOp::new(ctx, lhs, rhs, result_ty);
-            let result = op.get_result(ctx);
-            ins.append_op(ctx, &op);
-            Ok(vec![result])
+        Node::Add(add) => build_binary(
+            ctx,
+            ins,
+            scopes,
+            node,
+            &add.inputs,
+            &add.outputs,
+            AddOp::new,
+        ),
+        Node::Sub(sub) => build_binary(
+            ctx,
+            ins,
+            scopes,
+            node,
+            &sub.inputs,
+            &sub.outputs,
+            SubOp::new,
+        ),
+        Node::Mul(mul) => build_binary(
+            ctx,
+            ins,
+            scopes,
+            node,
+            &mul.inputs,
+            &mul.outputs,
+            MulOp::new,
+        ),
+        Node::Div(div) => {
+            expect_arity(node, div.inputs.len(), 2, div.outputs.len(), 1)?;
+            // Integer types are signless, and signless division lowers to signed division.
+            if is_arg_element_unsigned(&div.outputs[0].ty) {
+                return input_err_noloc!(FromOnnxGraphErr::UnsignedIntegerDiv(div.name.clone()));
+            }
+            build_binary(
+                ctx,
+                ins,
+                scopes,
+                node,
+                &div.inputs,
+                &div.outputs,
+                DivOp::new,
+            )
         }
 
-        Node::Mul(mul) => {
-            expect_arity(node, mul.inputs.len(), 2, mul.outputs.len(), 1)?;
-            let lhs = resolve_operand(ctx, ins, scopes, &mul.inputs[0], &mul.name)?;
-            let rhs = resolve_operand(ctx, ins, scopes, &mul.inputs[1], &mul.name)?;
-            let result_ty = arg_type_to_type(ctx, &mul.outputs[0].ty)?;
-            let op = MulOp::new(ctx, lhs, rhs, result_ty);
+        Node::MatMul(matmul) => {
+            expect_arity(node, matmul.inputs.len(), 2, matmul.outputs.len(), 1)?;
+            let lhs = resolve_operand(ctx, ins, scopes, &matmul.inputs[0], &matmul.name)?;
+            let rhs = resolve_operand(ctx, ins, scopes, &matmul.inputs[1], &matmul.name)?;
+            let inferred = value_shape(ctx, lhs.get_type(ctx))
+                .zip(value_shape(ctx, rhs.get_type(ctx)))
+                .and_then(|(lhs, rhs)| matmul_shapes(&lhs, &rhs))
+                .map(|shapes| shapes.result);
+            let declared = arg_type_to_type(ctx, &matmul.outputs[0].ty)?;
+            let result_ty = TypedHandle::<RankedTensorType>::from_handle(
+                refine_result_type(ctx, node, declared, inferred)?,
+                ctx,
+            )?;
+            let op = MatMulOp::new(ctx, lhs, rhs, result_ty);
             let result = op.get_result(ctx);
             ins.append_op(ctx, &op);
             Ok(vec![result])
@@ -217,7 +273,9 @@ fn build_node(
         Node::Cast(cast) => {
             expect_arity(node, cast.inputs.len(), 1, cast.outputs.len(), 1)?;
             let input = resolve_operand(ctx, ins, scopes, &cast.inputs[0], &cast.name)?;
-            let result_ty = arg_type_to_type(ctx, &cast.outputs[0].ty)?;
+            let declared = arg_type_to_type(ctx, &cast.outputs[0].ty)?;
+            let inferred = value_shape(ctx, input.get_type(ctx));
+            let result_ty = refine_result_type(ctx, node, declared, inferred)?;
             let signedness = CastSignednessAttr {
                 input_is_signed: is_arg_element_signed(&cast.inputs[0].ty),
                 result_is_signed: is_arg_element_signed(&cast.outputs[0].ty),
@@ -248,6 +306,72 @@ fn build_node(
 
         other => input_err_noloc!(FromOnnxGraphErr::UnsupportedNode(node_kind(other))),
     }
+}
+
+/// Build a broadcasting binary operation with one result.
+fn build_binary<T: Op>(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    scopes: &mut ValueScopes,
+    node: &Node,
+    inputs: &[Argument],
+    outputs: &[Argument],
+    new_op: fn(&mut Context, Value, Value, TypeHandle) -> T,
+) -> Result<Vec<Value>> {
+    expect_arity(node, inputs.len(), 2, outputs.len(), 1)?;
+    let lhs = resolve_operand(ctx, ins, scopes, &inputs[0], node.name())?;
+    let rhs = resolve_operand(ctx, ins, scopes, &inputs[1], node.name())?;
+    let declared = arg_type_to_type(ctx, &outputs[0].ty)?;
+    let inferred = value_shape(ctx, lhs.get_type(ctx))
+        .zip(value_shape(ctx, rhs.get_type(ctx)))
+        .and_then(|(lhs, rhs)| broadcast_shapes(&lhs, &rhs));
+    let result_ty = refine_result_type(ctx, node, declared, inferred)?;
+    let op = new_op(ctx, lhs, rhs, result_ty);
+    let result = op.get_operation().deref(ctx).get_result(0);
+    ins.append_op(ctx, &op);
+    Ok(vec![result])
+}
+
+/// Refine the `declared` tensor type of a node result with its `inferred` shape.
+///
+/// Each extent is computed as `declared ⊓ inferred`,
+/// where `?` is ⊤ and `n ⊓ m` is ⊥ (an error) for `n ≠ m`.
+///
+/// If `declared` is not a tensor or has a different rank than `inferred`,
+/// it is returned unchanged.
+fn refine_result_type(
+    ctx: &Context,
+    node: &Node,
+    declared: TypeHandle,
+    inferred: Option<Vec<Dimension>>,
+) -> Result<TypeHandle> {
+    let Ok(declared_tensor) = TypedHandle::<RankedTensorType>::from_handle(declared, ctx) else {
+        return Ok(declared);
+    };
+    let (element_type, declared_shape) = {
+        let tensor = declared_tensor.deref(ctx);
+        (tensor.element_type(), tensor.shape().clone())
+    };
+    let Some(inferred) = inferred.filter(|inferred| inferred.len() == declared_shape.len()) else {
+        return Ok(declared);
+    };
+
+    let shape = declared_shape
+        .iter()
+        .zip(&inferred)
+        .map(|(declared, inferred)| match (declared, inferred) {
+            (Dimension::Static(d), Dimension::Static(i)) if d != i => {
+                input_err_noloc!(FromOnnxGraphErr::ShapeConflict {
+                    node: node.name().to_string(),
+                    declared: declared.disp(ctx).to_string(),
+                    inferred: inferred.disp(ctx).to_string(),
+                })
+            }
+            (Dimension::Dynamic, inferred) => Ok(inferred.clone()),
+            (declared, _) => Ok(declared.clone()),
+        })
+        .collect::<Result<Vec<Dimension>>>()?;
+    Ok(RankedTensorType::get(ctx, element_type, shape).into())
 }
 
 /// Resolve an argument to an existing or newly materialized SSA value.

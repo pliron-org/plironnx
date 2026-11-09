@@ -64,6 +64,14 @@ pub fn is_arg_element_signed(ty: &ArgType) -> bool {
     )
 }
 
+/// Is `ty` an unsigned integer scalar or tensor?
+pub fn is_arg_element_unsigned(ty: &ArgType) -> bool {
+    matches!(
+        arg_dtype(ty),
+        Some(DType::U8 | DType::U16 | DType::U32 | DType::U64)
+    )
+}
+
 /// Converts an ONNX tensor shape to pliron dimensions.
 pub fn tensor_shape(ty: &TensorType) -> Vec<Dimension> {
     match &ty.static_shape {

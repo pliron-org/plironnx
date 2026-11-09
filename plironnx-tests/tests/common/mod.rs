@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use cargo_metadata::MetadataCommand;
 
 /// Locate the `tests/` directory of the `onnx-tests` crate (from the burn-onnx
-/// project) that we depend on. This is where the `.onnx` model fixtures used
+/// project) that we depend on. This is where the `.onnx` test models used
 /// by burn's own ONNX import tests live, one subdirectory per operator (e.g.
 /// `tests/add/add.onnx`).
 pub fn onnx_tests_dir() -> PathBuf {

@@ -9,27 +9,11 @@ mod cast_model {
 }
 
 use burn::tensor::{Bool, Device, Int, Tensor, TensorData};
-use pliron::{context::Context, op::verify_op, result::ExpectOk};
-use pliron_llvm::llvm_sys::lljit::SimpleJIT;
-use pliron_tensor::tensor::runtime_utils::TensorDesciptor;
-use plironnx::{
-    burn_onnx_ir::parse_onnx_file,
-    onnx::{entrypoint_abi::compile_packed_entrypoint, from_onnx_graph::build_module},
-};
 
 mod common;
+#[path = "common/jit.rs"]
+mod jit;
 mod utils;
-
-fn read_tensor_output<T: Copy>(descriptor: &[u8]) -> Vec<T> {
-    unsafe {
-        let descriptor =
-            TensorDesciptor::from_ir_descriptor(descriptor.as_ptr(), 2, size_of::<T>());
-        assert_eq!(descriptor.sizes(), &[2, 1]);
-        let mut values = Vec::new();
-        descriptor.copy_to_vec(&mut values);
-        values
-    }
-}
 
 #[test]
 fn cast_ir() {
@@ -58,19 +42,15 @@ fn cast() {
         input_scalar,
     );
 
-    let bool_data = input_bool.to_data();
-    let int_data = input_int.to_data();
-    let float_data = input_float.to_data();
-    let bool_values = bool_data.as_slice::<bool>().expect("bool input");
-    let int_values = int_data.as_slice::<i32>().expect("i32 input");
-    let float_values = float_data.as_slice::<f32>().expect("f32 input");
+    let input_data = [
+        input_bool.to_data(),
+        input_int.to_data(),
+        input_float.to_data(),
+    ];
     let input_descriptors = [
-        TensorDesciptor::new(vec![2, 1], size_of::<bool>(), bool_values.as_ptr().cast())
-            .build_ir_descriptor(),
-        TensorDesciptor::new(vec![2, 1], size_of::<i32>(), int_values.as_ptr().cast())
-            .build_ir_descriptor(),
-        TensorDesciptor::new(vec![2, 1], size_of::<f32>(), float_values.as_ptr().cast())
-            .build_ir_descriptor(),
+        jit::build_input_descriptor::<bool>(&input_data[0]),
+        jit::build_input_descriptor::<i32>(&input_data[1]),
+        jit::build_input_descriptor::<f32>(&input_data[2]),
     ];
     let inputs = [
         input_descriptors[0].as_ptr(),
@@ -79,64 +59,50 @@ fn cast() {
         (&raw const input_scalar).cast::<u8>(),
     ];
 
-    let graph = parse_onnx_file(common::onnx_tests_dir().join("cast/cast.onnx"))
-        .expect("failed to parse cast.onnx");
-    let ctx = &mut Context::new();
-    let module = build_module(ctx, &graph, "onnx_module", "model").expect_ok(ctx);
-    verify_op(&module, ctx).expect_ok(ctx);
-    let (llvm_ctx, llvm_module, abi) =
-        compile_packed_entrypoint(ctx, module, "model", "main").expect_ok(ctx);
-    assert_eq!((abi.num_inputs, abi.num_outputs), (4, 10));
-    llvm_module.verify().expect("generated LLVM IR must verify");
-    let jit = SimpleJIT::new(llvm_ctx, llvm_module).expect("failed to create JIT");
-
-    let mut tensor_outputs = [[0u8; (3 + 2 * 2) * size_of::<usize>()]; 9];
+    let mut tensor_outputs: [Vec<u8>; 9] =
+        std::array::from_fn(|_| jit::build_empty_output_descriptor(2));
     let mut scalar_output = 0i32;
     let outputs: Vec<*mut u8> = tensor_outputs
         .iter_mut()
         .map(|descriptor| descriptor.as_mut_ptr())
         .chain(std::iter::once((&raw mut scalar_output).cast::<u8>()))
         .collect();
-    let function = unsafe {
-        jit.lookup_symbol::<extern "C" fn(*const *const u8, *const *mut u8) -> ()>("main")
-    }
-    .expect("failed to find compiled main function");
-    function(inputs.as_ptr(), outputs.as_ptr());
+    jit::run_packed("cast/cast.onnx", &inputs, &outputs);
 
     assert_eq!(
-        read_tensor_output::<bool>(&tensor_outputs[0]),
+        jit::read_output::<bool>(&tensor_outputs[0], &[2, 1]),
         expected.0.to_data().as_slice::<bool>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<i32>(&tensor_outputs[1]),
+        jit::read_output::<i32>(&tensor_outputs[1], &[2, 1]),
         expected.1.to_data().as_slice::<i32>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<f32>(&tensor_outputs[2]),
+        jit::read_output::<f32>(&tensor_outputs[2], &[2, 1]),
         expected.2.to_data().as_slice::<f32>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<bool>(&tensor_outputs[3]),
+        jit::read_output::<bool>(&tensor_outputs[3], &[2, 1]),
         expected.3.to_data().as_slice::<bool>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<i32>(&tensor_outputs[4]),
+        jit::read_output::<i32>(&tensor_outputs[4], &[2, 1]),
         expected.4.to_data().as_slice::<i32>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<f32>(&tensor_outputs[5]),
+        jit::read_output::<f32>(&tensor_outputs[5], &[2, 1]),
         expected.5.to_data().as_slice::<f32>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<bool>(&tensor_outputs[6]),
+        jit::read_output::<bool>(&tensor_outputs[6], &[2, 1]),
         expected.6.to_data().as_slice::<bool>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<i32>(&tensor_outputs[7]),
+        jit::read_output::<i32>(&tensor_outputs[7], &[2, 1]),
         expected.7.to_data().as_slice::<i32>().unwrap()
     );
     assert_eq!(
-        read_tensor_output::<f32>(&tensor_outputs[8]),
+        jit::read_output::<f32>(&tensor_outputs[8], &[2, 1]),
         expected.8.to_data().as_slice::<f32>().unwrap()
     );
     assert_eq!(scalar_output, expected.9);

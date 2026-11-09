@@ -14,7 +14,7 @@ use pliron::{
         },
     },
     common_traits::Verify,
-    context::Context,
+    context::{Context, Ptr},
     derive::{op_interface, pliron_op},
     op::{Op, op_cast},
     operation::Operation,
@@ -28,7 +28,7 @@ use pliron_common_dialects::index::types::IndexType;
 use pliron_tensor::{
     memref::{
         op_interfaces::{DynamicDimensionOperandsOp, ReshapeOpInterface},
-        type_interfaces::{Dimension, ShapedType},
+        type_interfaces::{Dimension, MultiDimensionalType, ShapedType},
     },
     tensor::{
         attributes::CastSignednessAttr,
@@ -164,23 +164,30 @@ pub struct AddOp;
 
 impl AddOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![result_type],
-            vec![lhs, rhs],
-            vec![],
-            0,
-        );
-        AddOp { op }
+        AddOp {
+            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
+        }
     }
+}
 
-    pub fn lhs(&self, ctx: &Context) -> Value {
-        self.get_operation().deref(ctx).get_operand(0)
-    }
+/// Element-wise subtraction with implicit ONNX broadcasting, including host scalars.
+#[pliron_op(
+    name = "onnx.sub",
+    format = "operands(CharSpace(`,`)) ` : ` type($0)",
+    interfaces = [
+        NOpdsInterface<2>,
+        OneResultInterface,
+        BroadcastableBinaryOpInterface,
+    ],
+    verifier = "succ",
+)]
+pub struct SubOp;
 
-    pub fn rhs(&self, ctx: &Context) -> Value {
-        self.get_operation().deref(ctx).get_operand(1)
+impl SubOp {
+    pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
+        SubOp {
+            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
+        }
     }
 }
 
@@ -199,15 +206,117 @@ pub struct MulOp;
 
 impl MulOp {
     pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
-        let op = Operation::new(
-            ctx,
-            Self::get_concrete_op_info(),
-            vec![result_type],
-            vec![lhs, rhs],
-            vec![],
-            0,
-        );
-        MulOp { op }
+        MulOp {
+            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
+        }
+    }
+}
+
+/// Element-wise division with implicit ONNX broadcasting, including host scalars.
+/// Integer division truncates toward zero.
+#[pliron_op(
+    name = "onnx.div",
+    format = "operands(CharSpace(`,`)) ` : ` type($0)",
+    interfaces = [
+        NOpdsInterface<2>,
+        OneResultInterface,
+        BroadcastableBinaryOpInterface,
+    ],
+    verifier = "succ",
+)]
+pub struct DivOp;
+
+impl DivOp {
+    pub fn new(ctx: &mut Context, lhs: Value, rhs: Value, result_type: TypeHandle) -> Self {
+        DivOp {
+            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type),
+        }
+    }
+}
+
+/// Create the operation of a binary op `T` with no attributes and no regions.
+fn new_binary_operation<T: Op>(
+    ctx: &mut Context,
+    lhs: Value,
+    rhs: Value,
+    result_type: TypeHandle,
+) -> Ptr<Operation> {
+    Operation::new(
+        ctx,
+        T::get_concrete_op_info(),
+        vec![result_type],
+        vec![lhs, rhs],
+        vec![],
+        0,
+    )
+}
+
+/// Matrix product with NumPy semantics, as defined by ONNX `MatMul`.
+///
+/// | `lhs`                 | `rhs`                 | `result`      |
+/// |-----------------------|-----------------------|---------------|
+/// | `[..., M, K]`         | `[..., K, N]`         | `[..., M, N]` |
+/// | `[K]` (as `[1, K]`)   | `[..., K, N]`         | `[..., N]`    |
+/// | `[..., M, K]`         | `[K]` (as `[K, 1]`)   | `[..., M]`    |
+/// | `[K]` (as `[1, K]`)   | `[K]` (as `[K, 1]`)   | `[]`          |
+///
+/// The batch dimensions (`...`) broadcast.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `lhs` | The left tensor, of shape `[..., M, K]` or `[K]`. |
+/// | `rhs` | The right tensor, of shape `[..., K, N]` or `[K]`. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The product. |
+#[pliron_op(
+    name = "onnx.matmul",
+    format = "operands(CharSpace(`,`)) ` : ` type($0)",
+    interfaces = [
+        NOpdsInterface<2>,
+        OneResultInterface,
+        OperandNOfType<0, RankedTensorType>,
+        OperandNOfType<1, RankedTensorType>,
+        ResultNOfType<0, RankedTensorType>,
+    ],
+)]
+pub struct MatMulOp;
+
+#[derive(Debug, thiserror::Error)]
+pub enum MatMulOpVerifyErr {
+    #[error("The operands of onnx.matmul must have rank 1 or more")]
+    ScalarOperand,
+    #[error("onnx.matmul cannot multiply the shapes {lhs} and {rhs}")]
+    IncompatibleShapes { lhs: String, rhs: String },
+    #[error(
+        "The operands of onnx.matmul give the result shape {expected}, but the result has the shape {got}"
+    )]
+    ResultShapeMismatch { expected: String, got: String },
+    #[error(
+        "The operand and result element types of onnx.matmul are different: {lhs}, {rhs} and {result}"
+    )]
+    ElementTypeMismatch {
+        lhs: String,
+        rhs: String,
+        result: String,
+    },
+}
+
+impl MatMulOp {
+    pub fn new(
+        ctx: &mut Context,
+        lhs: Value,
+        rhs: Value,
+        result_type: TypedHandle<RankedTensorType>,
+    ) -> Self {
+        MatMulOp {
+            op: new_binary_operation::<Self>(ctx, lhs, rhs, result_type.into()),
+        }
     }
 
     pub fn lhs(&self, ctx: &Context) -> Value {
@@ -217,6 +326,139 @@ impl MulOp {
     pub fn rhs(&self, ctx: &Context) -> Value {
         self.get_operation().deref(ctx).get_operand(1)
     }
+}
+
+impl Verify for MatMulOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        let loc = self.loc(ctx);
+        let tensor_type = |value: Value| {
+            TypedHandle::<RankedTensorType>::from_handle(value.get_type(ctx), ctx)
+                .expect("the interfaces verify that the operands and the result are ranked tensors")
+        };
+        let lhs_ty = tensor_type(self.lhs(ctx));
+        let rhs_ty = tensor_type(self.rhs(ctx));
+        let result_ty = tensor_type(self.get_result(ctx));
+        let (lhs_ty, rhs_ty, result_ty) =
+            (lhs_ty.deref(ctx), rhs_ty.deref(ctx), result_ty.deref(ctx));
+
+        if lhs_ty.rank() == 0 || rhs_ty.rank() == 0 {
+            return verify_err!(loc, MatMulOpVerifyErr::ScalarOperand);
+        }
+        let expected = matmul_shapes(lhs_ty.shape(), rhs_ty.shape())
+            .ok_or_else(|| {
+                verify_error!(
+                    loc.clone(),
+                    MatMulOpVerifyErr::IncompatibleShapes {
+                        lhs: disp_shape(ctx, lhs_ty.shape()),
+                        rhs: disp_shape(ctx, rhs_ty.shape()),
+                    }
+                )
+            })?
+            .result;
+        if !shapes_may_match(&expected, result_ty.shape()) {
+            return verify_err!(
+                loc,
+                MatMulOpVerifyErr::ResultShapeMismatch {
+                    expected: disp_shape(ctx, &expected),
+                    got: disp_shape(ctx, result_ty.shape()),
+                }
+            );
+        }
+
+        let element_type = lhs_ty.element_type();
+        if rhs_ty.element_type() != element_type || result_ty.element_type() != element_type {
+            return verify_err!(
+                loc,
+                MatMulOpVerifyErr::ElementTypeMismatch {
+                    lhs: element_type.disp(ctx).to_string(),
+                    rhs: rhs_ty.element_type().disp(ctx).to_string(),
+                    result: result_ty.element_type().disp(ctx).to_string(),
+                }
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Shapes of an ONNX matrix product.
+///
+/// The shapes are taken after:
+/// - vector operands are promoted to matrices
+/// - batch dimensions are broadcast
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatMulShapes {
+    /// The `lhs` shape after the promotion of a vector to a `[1, K]` matrix.
+    pub lhs_matrix: Vec<Dimension>,
+    /// The `rhs` shape after the promotion of a vector to a `[K, 1]` matrix.
+    pub rhs_matrix: Vec<Dimension>,
+    /// The `lhs` matrix shape with the broadcast batch dimensions.
+    pub lhs_batched: Vec<Dimension>,
+    /// The `rhs` matrix shape with the broadcast batch dimensions.
+    pub rhs_batched: Vec<Dimension>,
+    /// The shape of the matrix product of `lhs_batched` and `rhs_batched`, `[..., M, N]`.
+    /// [`Self::result`] removes `M` if `lhs` is a vector, and `N` if `rhs` is a vector.
+    pub result_batched: Vec<Dimension>,
+    /// The ONNX result shape.
+    pub result: Vec<Dimension>,
+}
+
+/// Compute [MatMulShapes] of `lhs x rhs` for compatible shapes.
+pub fn matmul_shapes(lhs: &[Dimension], rhs: &[Dimension]) -> Option<MatMulShapes> {
+    if lhs.is_empty() || rhs.is_empty() {
+        // Rank-0 operands are incompatible with anything.
+        return None;
+    }
+    // Promote a vector `lhs` to a `[1, K]` matrix and a vector `rhs` to a `[K, 1]` matrix.
+    let lhs_matrix = if lhs.len() == 1 {
+        vec![Dimension::Static(1), lhs[0].clone()]
+    } else {
+        lhs.to_vec()
+    };
+    let rhs_matrix = if rhs.len() == 1 {
+        vec![rhs[0].clone(), Dimension::Static(1)]
+    } else {
+        rhs.to_vec()
+    };
+    let (lhs_batch, lhs_mk) = lhs_matrix.split_at(lhs_matrix.len() - 2);
+    let (rhs_batch, rhs_kn) = rhs_matrix.split_at(rhs_matrix.len() - 2);
+    let (m, lhs_k) = (lhs_mk[0].clone(), lhs_mk[1].clone());
+    let (rhs_k, n) = (rhs_kn[0].clone(), rhs_kn[1].clone());
+    // The two `K` extents must not conflict.
+    if matches!((&lhs_k, &rhs_k), (Dimension::Static(l), Dimension::Static(r)) if l != r) {
+        return None;
+    }
+    let batch = broadcast_shapes(lhs_batch, rhs_batch)?;
+    let batched = |rows: &Dimension, cols: &Dimension| {
+        let mut shape = batch.clone();
+        shape.extend([rows.clone(), cols.clone()]);
+        shape
+    };
+
+    // Add `M` only if `lhs` is not a vector, and `N` only if `rhs` is not a vector.
+    let mut result = batch.clone();
+    if lhs.len() != 1 {
+        result.push(m.clone());
+    }
+    if rhs.len() != 1 {
+        result.push(n.clone());
+    }
+    Some(MatMulShapes {
+        lhs_batched: batched(&m, &lhs_k),
+        rhs_batched: batched(&rhs_k, &n),
+        result_batched: batched(&m, &n),
+        lhs_matrix,
+        rhs_matrix,
+        result,
+    })
+}
+
+/// Do `lhs` and `rhs` have the same rank without conflicting static extents?
+fn shapes_may_match(lhs: &[Dimension], rhs: &[Dimension]) -> bool {
+    lhs.len() == rhs.len()
+        && lhs
+            .iter()
+            .zip(rhs)
+            .all(|(l, r)| !matches!((l, r), (Dimension::Static(l), Dimension::Static(r)) if l != r))
 }
 
 /// Shape-preserving element-type cast. The result type encodes ONNX `to`.
@@ -400,6 +642,16 @@ pub enum BroadcastableBinaryOpVerifyErr {
 /// Operations whose two operands use ONNX broadcasting and preserve their element type.
 #[op_interface]
 pub trait BroadcastableBinaryOpInterface: NOpdsInterface<2> + OneResultInterface {
+    /// The left operand.
+    fn lhs(&self, ctx: &Context) -> Value {
+        self.get_operation().deref(ctx).get_operand(0)
+    }
+
+    /// The right operand.
+    fn rhs(&self, ctx: &Context) -> Value {
+        self.get_operation().deref(ctx).get_operand(1)
+    }
+
     /// Check ONNX broadcast compatibility and matching operand/result element types.
     fn verify(op: &dyn Op, ctx: &Context) -> Result<()>
     where
@@ -438,12 +690,7 @@ pub trait BroadcastableBinaryOpInterface: NOpdsInterface<2> + OneResultInterface
             )
         })?;
 
-        // Unknown extents cannot rule out shape compatibility.
-        if broadcast.len() != result_shape.len()
-            || broadcast.iter().zip(result_shape.iter()).any(
-                |(b, r)| matches!((b, r), (Dimension::Static(b), Dimension::Static(r)) if b != r),
-            )
-        {
+        if !shapes_may_match(&broadcast, &result_shape) {
             return verify_err!(
                 loc,
                 BroadcastableBinaryOpVerifyErr::ResultShapeMismatch {

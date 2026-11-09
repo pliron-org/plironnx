@@ -1,6 +1,6 @@
 [package]
 name = "plironnx-tests"
-description = "Test harness comparing plironnx against burn-onnx's onnx-tests fixtures"
+description = "Test harness comparing plironnx against the test models of burn-onnx's onnx-tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

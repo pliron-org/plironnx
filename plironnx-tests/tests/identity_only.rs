@@ -11,8 +11,8 @@ mod identity_only_model {
 use burn::tensor::{Device, Tensor};
 
 mod common;
-#[path = "common/single_input_f32.rs"]
-mod single_input_f32;
+#[path = "common/jit.rs"]
+mod jit;
 mod utils;
 
 #[test]
@@ -35,7 +35,6 @@ fn identity_only() {
         &device,
     );
     let expected = identity_only_model::Model::default().forward(input.clone());
-    let actual =
-        single_input_f32::run_plironnx("identity/identity_only.onnx", &input, input.dims());
+    let actual = jit::run_single_f32("identity/identity_only.onnx", &input, input.dims());
     actual.to_data().assert_eq(&expected.to_data(), true);
 }

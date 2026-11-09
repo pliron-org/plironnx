@@ -11,8 +11,8 @@ mod initializer_to_const_model {
 use burn::tensor::{Device, Tensor};
 
 mod common;
-#[path = "common/single_input_f32.rs"]
-mod single_input_f32;
+#[path = "common/jit.rs"]
+mod jit;
 mod utils;
 
 #[test]
@@ -32,7 +32,7 @@ fn initializer_to_const() {
     let device: Device = Default::default();
     let input = Tensor::<2>::from_floats([[1., 1., 1.], [1., 1., 1.]], &device);
     let expected = initializer_to_const_model::Model::default().forward(input.clone());
-    let actual = single_input_f32::run_plironnx(
+    let actual = jit::run_single_f32(
         "initializer_to_const/initializer_to_const.onnx",
         &input,
         input.dims(),

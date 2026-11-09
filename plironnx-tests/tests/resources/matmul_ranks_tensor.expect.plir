@@ -1,0 +1,42 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <3x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >, tensor.ranked <3 : builtin.fp32 >, tensor.ranked <4x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >) -> (tensor.ranked <3 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >, tensor.ranked <2x3 : builtin.fp32 >, tensor.ranked <2x4 : builtin.fp32 >, tensor.ranked <3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(mat2d_v0: tensor.ranked <3x4 : builtin.fp32 >, mat3d_v1: tensor.ranked <2x3x4 : builtin.fp32 >, vec_v2: tensor.ranked <4 : builtin.fp32 >, vec3_v3: tensor.ranked <3 : builtin.fp32 >, mat2d_square_v4: tensor.ranked <4x4 : builtin.fp32 >, mat3d_for_vec_v5: tensor.ranked <2x3x4 : builtin.fp32 >) !0:
+        v11 = tensor.reshape vec_v2 : tensor.ranked <4x1 : builtin.fp32 >;
+        v12 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v13 = tensor.splat v12 : tensor.ranked <3x1 : builtin.fp32 >;
+        v14 = tensor.matmul mat2d_v0, v11, v13 : tensor.ranked <3x1 : builtin.fp32 >;
+        matmul1_out1_v15 = tensor.reshape v14 : tensor.ranked <3 : builtin.fp32 > !1;
+        v16 = tensor.reshape vec_v2 : tensor.ranked <1x4 : builtin.fp32 >;
+        v17 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v18 = tensor.splat v17 : tensor.ranked <1x4 : builtin.fp32 >;
+        v19 = tensor.matmul v16, mat2d_square_v4, v18 : tensor.ranked <1x4 : builtin.fp32 >;
+        matmul2_out1_v20 = tensor.reshape v19 : tensor.ranked <4 : builtin.fp32 > !2;
+        v21 = tensor.reshape vec_v2 : tensor.ranked <4x1 : builtin.fp32 >;
+        v22 = tensor.broadcast v21 : tensor.ranked <2x4x1 : builtin.fp32 >;
+        v23 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v24 = tensor.splat v23 : tensor.ranked <2x3x1 : builtin.fp32 >;
+        v25 = tensor.batch_matmul mat3d_v1, v22, v24 : tensor.ranked <2x3x1 : builtin.fp32 >;
+        matmul3_out1_v26 = tensor.reshape v25 : tensor.ranked <2x3 : builtin.fp32 > !3;
+        v27 = tensor.reshape vec3_v3 : tensor.ranked <1x3 : builtin.fp32 >;
+        v28 = tensor.broadcast v27 : tensor.ranked <2x1x3 : builtin.fp32 >;
+        v29 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v30 = tensor.splat v29 : tensor.ranked <2x1x4 : builtin.fp32 >;
+        v31 = tensor.batch_matmul v28, mat3d_for_vec_v5, v30 : tensor.ranked <2x1x4 : builtin.fp32 >;
+        matmul4_out1_v32 = tensor.reshape v31 : tensor.ranked <2x4 : builtin.fp32 > !4;
+        v33 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v34 = tensor.splat v33 : tensor.ranked <3x4 : builtin.fp32 >;
+        matmul5_out1_v35 = tensor.matmul mat2d_v0, mat2d_square_v4, v34 : tensor.ranked <3x4 : builtin.fp32 > !5;
+        onnx.return matmul1_out1_v15, matmul2_out1_v20, matmul3_out1_v26, matmul4_out1_v32, matmul5_out1_v35
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [mat2d, mat3d, vec, vec3, mat2d_square, mat3d_for_vec]]
+!1 = [builtin_given_names = builtin.given_names [matmul1_out1]]
+!2 = [builtin_given_names = builtin.given_names [matmul2_out1]]
+!3 = [builtin_given_names = builtin.given_names [matmul3_out1]]
+!4 = [builtin_given_names = builtin.given_names [matmul4_out1]]
+!5 = [builtin_given_names = builtin.given_names [matmul5_out1]]

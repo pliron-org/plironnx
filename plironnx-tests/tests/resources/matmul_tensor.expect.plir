@@ -1,0 +1,30 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x2x3x4 : builtin.fp32 >, tensor.ranked <1x2x4x2 : builtin.fp32 >, tensor.ranked <2x3x4x4 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >) -> (tensor.ranked <1x2x3x2 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(a_v0: tensor.ranked <1x2x3x4 : builtin.fp32 >, b_v1: tensor.ranked <1x2x4x2 : builtin.fp32 >, c_v2: tensor.ranked <2x3x4x4 : builtin.fp32 >, d_v3: tensor.ranked <4 : builtin.fp32 >) !0:
+        v7 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v8 = tensor.splat v7 : tensor.ranked <1x2x3x2 : builtin.fp32 >;
+        matmul1_out1_v9 = tensor.batch_matmul a_v0, b_v1, v8 : tensor.ranked <1x2x3x2 : builtin.fp32 > !1;
+        v10 = tensor.reshape d_v3 : tensor.ranked <4x1 : builtin.fp32 >;
+        v11 = tensor.broadcast v10 : tensor.ranked <2x3x4x1 : builtin.fp32 >;
+        v12 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v13 = tensor.splat v12 : tensor.ranked <2x3x4x1 : builtin.fp32 >;
+        v14 = tensor.batch_matmul c_v2, v11, v13 : tensor.ranked <2x3x4x1 : builtin.fp32 >;
+        matmul2_out1_v15 = tensor.reshape v14 : tensor.ranked <2x3x4 : builtin.fp32 > !2;
+        v16 = tensor.reshape d_v3 : tensor.ranked <1x4 : builtin.fp32 >;
+        v17 = tensor.broadcast v16 : tensor.ranked <2x3x1x4 : builtin.fp32 >;
+        v18 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v19 = tensor.splat v18 : tensor.ranked <2x3x1x4 : builtin.fp32 >;
+        v20 = tensor.batch_matmul v17, c_v2, v19 : tensor.ranked <2x3x1x4 : builtin.fp32 >;
+        matmul3_out1_v21 = tensor.reshape v20 : tensor.ranked <2x3x4 : builtin.fp32 > !3;
+        onnx.return matmul1_out1_v9, matmul2_out1_v15, matmul3_out1_v21
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [a, b, c, d]]
+!1 = [builtin_given_names = builtin.given_names [matmul1_out1]]
+!2 = [builtin_given_names = builtin.given_names [matmul2_out1]]
+!3 = [builtin_given_names = builtin.given_names [matmul3_out1]]

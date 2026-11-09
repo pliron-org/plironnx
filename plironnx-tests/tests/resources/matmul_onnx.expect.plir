@@ -1,0 +1,18 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x2x3x4 : builtin.fp32 >, tensor.ranked <1x2x4x2 : builtin.fp32 >, tensor.ranked <2x3x4x4 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >) -> (tensor.ranked <1x2x3x2 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(a_v0: tensor.ranked <1x2x3x4 : builtin.fp32 >, b_v1: tensor.ranked <1x2x4x2 : builtin.fp32 >, c_v2: tensor.ranked <2x3x4x4 : builtin.fp32 >, d_v3: tensor.ranked <4 : builtin.fp32 >) !0:
+        matmul1_out1_v4 = onnx.matmul a_v0, b_v1 : tensor.ranked <1x2x3x2 : builtin.fp32 > !1;
+        matmul2_out1_v5 = onnx.matmul c_v2, d_v3 : tensor.ranked <2x3x4 : builtin.fp32 > !2;
+        matmul3_out1_v6 = onnx.matmul d_v3, c_v2 : tensor.ranked <2x3x4 : builtin.fp32 > !3;
+        onnx.return matmul1_out1_v4, matmul2_out1_v5, matmul3_out1_v6
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [a, b, c, d]]
+!1 = [builtin_given_names = builtin.given_names [matmul1_out1]]
+!2 = [builtin_given_names = builtin.given_names [matmul2_out1]]
+!3 = [builtin_given_names = builtin.given_names [matmul3_out1]]

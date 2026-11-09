@@ -1,0 +1,22 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <3x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >, tensor.ranked <3 : builtin.fp32 >, tensor.ranked <4x4 : builtin.fp32 >, tensor.ranked <2x3x4 : builtin.fp32 >) -> (tensor.ranked <3 : builtin.fp32 >, tensor.ranked <4 : builtin.fp32 >, tensor.ranked <2x3 : builtin.fp32 >, tensor.ranked <2x4 : builtin.fp32 >, tensor.ranked <3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(mat2d_v0: tensor.ranked <3x4 : builtin.fp32 >, mat3d_v1: tensor.ranked <2x3x4 : builtin.fp32 >, vec_v2: tensor.ranked <4 : builtin.fp32 >, vec3_v3: tensor.ranked <3 : builtin.fp32 >, mat2d_square_v4: tensor.ranked <4x4 : builtin.fp32 >, mat3d_for_vec_v5: tensor.ranked <2x3x4 : builtin.fp32 >) !0:
+        matmul1_out1_v6 = onnx.matmul mat2d_v0, vec_v2 : tensor.ranked <3 : builtin.fp32 > !1;
+        matmul2_out1_v7 = onnx.matmul vec_v2, mat2d_square_v4 : tensor.ranked <4 : builtin.fp32 > !2;
+        matmul3_out1_v8 = onnx.matmul mat3d_v1, vec_v2 : tensor.ranked <2x3 : builtin.fp32 > !3;
+        matmul4_out1_v9 = onnx.matmul vec3_v3, mat3d_for_vec_v5 : tensor.ranked <2x4 : builtin.fp32 > !4;
+        matmul5_out1_v10 = onnx.matmul mat2d_v0, mat2d_square_v4 : tensor.ranked <3x4 : builtin.fp32 > !5;
+        onnx.return matmul1_out1_v6, matmul2_out1_v7, matmul3_out1_v8, matmul4_out1_v9, matmul5_out1_v10
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [mat2d, mat3d, vec, vec3, mat2d_square, mat3d_for_vec]]
+!1 = [builtin_given_names = builtin.given_names [matmul1_out1]]
+!2 = [builtin_given_names = builtin.given_names [matmul2_out1]]
+!3 = [builtin_given_names = builtin.given_names [matmul3_out1]]
+!4 = [builtin_given_names = builtin.given_names [matmul4_out1]]
+!5 = [builtin_given_names = builtin.given_names [matmul5_out1]]

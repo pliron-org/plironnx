@@ -1,0 +1,29 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x2x3x4 : builtin.fp32 >, builtin.fp64 ) -> (tensor.ranked <1x2x3x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(onnx_sub_0_v0: tensor.ranked <1x2x3x4 : builtin.fp32 >, onnx_cast_1_v1: builtin.fp64 ) !0:
+        constant1_out1_v9 = tensor.constant <tensor.ranked <1x1x1x4 : builtin.fp32 > = splat 1> : tensor.ranked <1x1x1x4 : builtin.fp32 > !1;
+        v10 = tensor.broadcast constant1_out1_v9 : tensor.ranked <1x2x3x4 : builtin.fp32 >;
+        sub1_out1_v11 = tensor.sub onnx_sub_0_v0, v10 : tensor.ranked <1x2x3x4 : builtin.fp32 > !2;
+        cast1_out1_v12 = llvm.fptrunc <> onnx_cast_1_v1 to builtin.fp32  !3;
+        constant2_out1_v13 = builtin.constant <builtin.single 9> : builtin.fp32  !4;
+        sub2_out1_v14 = llvm.fsub <> cast1_out1_v12, constant2_out1_v13 : builtin.fp32  !5;
+        v15 = tensor.splat sub2_out1_v14 : tensor.ranked <1x2x3x4 : builtin.fp32 >;
+        sub3_out1_v16 = tensor.sub sub1_out1_v11, v15 : tensor.ranked <1x2x3x4 : builtin.fp32 > !6;
+        v17 = tensor.splat sub2_out1_v14 : tensor.ranked <1x2x3x4 : builtin.fp32 >;
+        sub4_out1_v18 = tensor.sub v17, sub3_out1_v16 : tensor.ranked <1x2x3x4 : builtin.fp32 > !7;
+        onnx.return sub4_out1_v18
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [onnx_sub_0, onnx_cast_1]]
+!1 = [builtin_given_names = builtin.given_names [constant1_out1]]
+!2 = [builtin_given_names = builtin.given_names [sub1_out1]]
+!3 = [builtin_given_names = builtin.given_names [cast1_out1]]
+!4 = [builtin_given_names = builtin.given_names [constant2_out1]]
+!5 = [builtin_given_names = builtin.given_names [sub2_out1]]
+!6 = [builtin_given_names = builtin.given_names [sub3_out1]]
+!7 = [builtin_given_names = builtin.given_names [sub4_out1]]

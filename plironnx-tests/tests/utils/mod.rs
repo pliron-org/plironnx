@@ -33,13 +33,13 @@ use plironnx::{
 
 use crate::common::onnx_tests_dir;
 
-/// Snapshot the ONNX, tensor, and final Pliron LLVM-dialect IR for a fixture.
+/// Snapshot the ONNX, tensor, and final Pliron LLVM-dialect IR for a test model.
 ///
 /// `input` is relative to the upstream `onnx-tests/tests` directory;
 /// `expect_files` are relative to this crate's `tests/resources` directory.
 pub fn assert_ir_snapshots(input: impl AsRef<Path>, expect_files: [&str; 3]) {
     let graph =
-        parse_onnx_file(onnx_tests_dir().join(input)).expect("failed to parse ONNX test fixture");
+        parse_onnx_file(onnx_tests_dir().join(input)).expect("failed to parse ONNX test model");
     let ctx = &mut Context::new();
     let module = build_module(ctx, &graph, "onnx_module", "model").expect_ok(ctx);
     verify_op(&module, ctx).expect_ok(ctx);
@@ -59,7 +59,7 @@ pub fn assert_ir_snapshots(input: impl AsRef<Path>, expect_files: [&str; 3]) {
         .iter(ctx)
         .filter_map(|op| Operation::get_op::<BuiltinFuncOp>(op, ctx))
         .next()
-        .expect("ONNX test fixture must define a model function");
+        .expect("ONNX test model must define a model function");
     let abi = lower_model_outputs(ctx, model).expect_ok(ctx);
     apply_dialect_conversion(ctx, &mut BuiltinToLLVMConversion, root).expect_ok(ctx);
     bufferize(&mut MallocFreeTMM, root, ctx).expect_ok(ctx);

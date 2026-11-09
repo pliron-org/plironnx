@@ -9,15 +9,10 @@ mod mul_broadcast_model {
 }
 
 use burn::tensor::{Device, Tensor};
-use pliron::{context::Context, op::verify_op, result::ExpectOk};
-use pliron_llvm::llvm_sys::lljit::SimpleJIT;
-use pliron_tensor::tensor::runtime_utils::TensorDesciptor;
-use plironnx::{
-    burn_onnx_ir::parse_onnx_file,
-    onnx::{entrypoint_abi::compile_packed_entrypoint, from_onnx_graph::build_module},
-};
 
 mod common;
+#[path = "common/jit.rs"]
+mod jit;
 mod utils;
 
 fn run_broadcast_plironnx(
@@ -32,53 +27,23 @@ fn run_broadcast_plironnx(
         a_2d.to_data(),
         b_3d.to_data(),
     ];
-    let input_shapes = [vec![2, 3, 4], vec![3, 4], vec![3, 4], vec![2, 3, 4]];
-    let input_descriptors: Vec<_> = input_data
-        .iter()
-        .zip(input_shapes)
-        .map(|(data, shape)| {
-            let values = data
-                .as_slice::<f32>()
-                .expect("input must contain f32 values");
-            TensorDesciptor::new(shape, size_of::<f32>(), values.as_ptr().cast())
-                .build_ir_descriptor()
-        })
-        .collect();
-
-    let graph = parse_onnx_file(common::onnx_tests_dir().join("mul/mul_broadcast.onnx"))
-        .expect("failed to parse mul_broadcast.onnx");
-    let ctx = &mut Context::new();
-    let module = build_module(ctx, &graph, "onnx_module", "model").expect_ok(ctx);
-    verify_op(&module, ctx).expect_ok(ctx);
-    let (llvm_ctx, llvm_module, abi) =
-        compile_packed_entrypoint(ctx, module, "model", "main").expect_ok(ctx);
-    assert_eq!((abi.num_inputs, abi.num_outputs), (4, 2));
-    llvm_module.verify().expect("generated LLVM IR must verify");
-    let jit = SimpleJIT::new(llvm_ctx, llvm_module).expect("failed to create JIT");
-
-    let inputs: Vec<_> = input_descriptors.iter().map(Vec::as_ptr).collect();
-    let mut output1_descriptor = vec![0u8; (3 + 2 * 3) * size_of::<usize>()];
-    let mut output2_descriptor = vec![0u8; (3 + 2 * 3) * size_of::<usize>()];
-    let outputs = [
-        output1_descriptor.as_mut_ptr(),
-        output2_descriptor.as_mut_ptr(),
+    let input_descriptors = input_data
+        .each_ref()
+        .map(jit::build_input_descriptor::<f32>);
+    let mut outputs = [
+        jit::build_empty_output_descriptor(3),
+        jit::build_empty_output_descriptor(3),
     ];
-    let function = unsafe {
-        jit.lookup_symbol::<extern "C" fn(*const *const u8, *const *mut u8) -> ()>("main")
-    }
-    .expect("failed to find compiled main function");
-    function(inputs.as_ptr(), outputs.as_ptr());
-
-    let read_output = |descriptor: &[u8]| unsafe {
-        let descriptor =
-            TensorDesciptor::from_ir_descriptor(descriptor.as_ptr(), 3, size_of::<f32>());
-        let mut values: Vec<f32> = Vec::new();
-        descriptor.copy_to_vec(&mut values);
-        Tensor::<1>::from_floats(values.as_slice(), &Default::default()).reshape([2, 3, 4])
-    };
+    jit::run_packed(
+        "mul/mul_broadcast.onnx",
+        &input_descriptors
+            .each_ref()
+            .map(|descriptor| descriptor.as_ptr()),
+        &outputs.each_mut().map(|descriptor| descriptor.as_mut_ptr()),
+    );
     (
-        read_output(&output1_descriptor),
-        read_output(&output2_descriptor),
+        jit::read_f32_output(&outputs[0], [2, 3, 4]),
+        jit::read_f32_output(&outputs[1], [2, 3, 4]),
     )
 }
 
