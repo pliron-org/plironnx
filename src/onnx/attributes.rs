@@ -3,7 +3,7 @@
 
 //! ONNX constant data to dense tensor or builtin scalar attributes.
 
-use onnx_ir::TensorData;
+use onnx_ir::{DType, TensorData};
 
 use pliron::{
     builtin::attr_interfaces::TypedAttrInterface, context::Context, input_err_noloc,
@@ -40,6 +40,18 @@ pub fn constant_value_attr(
     data: &TensorData,
     result_type: TypeHandle,
 ) -> Result<Box<dyn TypedAttrInterface>> {
+    constant_value_attr_from_bytes(ctx, data.dtype(), data.as_bytes().to_vec(), result_type)
+}
+
+/// Build a tensor or scalar constant attribute
+/// from owned `bytes` of the element type `dtype`,
+/// compressing uniform data to a splat.
+pub fn constant_value_attr_from_bytes(
+    ctx: &Context,
+    dtype: DType,
+    bytes: Vec<u8>,
+    result_type: TypeHandle,
+) -> Result<Box<dyn TypedAttrInterface>> {
     if let Ok(shaped_ty) = ShapedTypeHandle::from_handle(result_type, ctx) {
         let (element_size, num_elements) = {
             let shaped = shaped_ty.deref(ctx);
@@ -60,11 +72,11 @@ pub fn constant_value_attr(
             (element_size, num_elements)
         };
 
-        let bytes = checked_bytes(ctx, data, element_size, num_elements, result_type)?;
+        let bytes = checked_bytes(ctx, dtype, bytes, element_size, num_elements, result_type)?;
         Ok(Box::new(DenseElementsAttr::new(ctx, shaped_ty, bytes)?))
     } else if let Ok(element_ty) = DenseElementTypeHandle::from_handle(result_type, ctx) {
         let element_size = element_ty.deref(ctx).element_size();
-        let bytes = checked_bytes(ctx, data, element_size, 1, result_type)?;
+        let bytes = checked_bytes(ctx, dtype, bytes, element_size, 1, result_type)?;
         Ok(element_ty.deref(ctx).element_attr(ctx, &bytes))
     } else {
         input_err_noloc!(ConstantDataErr::UnsupportedResultType(
@@ -76,17 +88,15 @@ pub fn constant_value_attr(
 /// Validate constant data and compress uniform multi-element values to a splat.
 fn checked_bytes(
     ctx: &Context,
-    data: &TensorData,
+    dtype: DType,
+    mut bytes: Vec<u8>,
     element_size: usize,
     num_elements: usize,
     ty: TypeHandle,
 ) -> Result<Vec<u8>> {
-    let dtype_size = data.dtype().size();
-
-    let bytes = data.as_bytes();
-    if dtype_size != element_size || bytes.len() != num_elements * element_size {
+    if dtype.size() != element_size || bytes.len() != num_elements * element_size {
         return input_err_noloc!(ConstantDataErr::DTypeSizeMismatch {
-            dtype: format!("{:?}", data.dtype()),
+            dtype: format!("{dtype:?}"),
             ty: ty.disp(ctx).to_string(),
             expected: num_elements * element_size,
             got: bytes.len(),
@@ -97,8 +107,8 @@ fn checked_bytes(
         let first = &bytes[..element_size];
         if bytes.chunks(element_size).all(|chunk| chunk == first) {
             // This is a splat.
-            return Ok(first.to_vec());
+            bytes.truncate(element_size);
         }
     }
-    Ok(bytes.to_vec())
+    Ok(bytes)
 }

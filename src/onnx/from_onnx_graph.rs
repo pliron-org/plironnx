@@ -3,7 +3,9 @@
 
 //! Build ONNX dialect IR from a topologically ordered burn-onnx graph.
 
-use onnx_ir::{Argument, Node, OnnxGraph, ValueSource, node::reshape::ReshapeInput};
+use onnx_ir::{
+    ArgType, Argument, DataId, Node, OnnxGraph, ValueSource, node::reshape::ReshapeInput,
+};
 
 use pliron::{
     builtin::{
@@ -28,12 +30,15 @@ use pliron::{
 };
 
 use crate::onnx::{
-    attributes::constant_value_attr,
+    attributes::{constant_value_attr, constant_value_attr_from_bytes},
     ops::{
         AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReshapeOp, ReturnOp, SubOp,
         matmul_shapes,
     },
-    types::{arg_type_to_type, is_arg_element_signed, is_arg_element_unsigned, value_shape},
+    types::{
+        arg_type_to_type, dtype_to_type, is_arg_element_signed, is_arg_element_unsigned,
+        value_shape,
+    },
 };
 use pliron_tensor::memref::type_interfaces::{Dimension, MultiDimensionalType, ShapedType};
 use pliron_tensor::tensor::attributes::CastSignednessAttr;
@@ -65,6 +70,8 @@ pub enum FromOnnxGraphErr {
     OptionalInput(String, String),
     #[error("The argument `{0}` must hold a constant, but it has no data")]
     MissingConstantData(String),
+    #[error("The constant `{0}` must be a 2-D tensor")]
+    NotAMatrix(String),
     #[error("The node `{0}` needs a compile-time reshape shape")]
     DynamicReshapeShape(String),
     #[error("The node `{0}` divides unsigned integers, which is not supported")]
@@ -79,23 +86,32 @@ pub enum FromOnnxGraphErr {
     },
 }
 
-/// Scoped ONNX names; inner definitions shadow outer ones.
+/// Values defined in one scope of [ValueScopes].
+#[derive(Default)]
+struct Scope {
+    /// ONNX names mapped to their pliron values.
+    names: HMap<String, Value>,
+    /// Static constant data IDs mapped to their materialized pliron values.
+    statics: HMap<DataId, Value>,
+}
+
+/// Scoped ONNX names and static constants.
 #[derive(Default)]
 pub struct ValueScopes {
-    scopes: Vec<HMap<String, Value>>,
+    scopes: Vec<Scope>,
 }
 
 impl ValueScopes {
     /// Start with one empty scope.
     pub fn new() -> Self {
         ValueScopes {
-            scopes: vec![HMap::default()],
+            scopes: vec![Scope::default()],
         }
     }
 
     /// Enter a nested scope.
     pub fn push(&mut self) {
-        self.scopes.push(HMap::default());
+        self.scopes.push(Scope::default());
     }
 
     /// Leave the current nested scope.
@@ -106,22 +122,43 @@ impl ValueScopes {
 
     /// Insert in the current scope, rejecting duplicate definitions.
     pub fn insert(&mut self, name: &str, value: Value) -> Result<()> {
-        let scope = self
-            .scopes
-            .last_mut()
-            .expect("the stack always has one scope or more");
-        if scope.insert(name.to_string(), value).is_some() {
+        if self
+            .current()
+            .names
+            .insert(name.to_string(), value)
+            .is_some()
+        {
             return input_err_noloc!(FromOnnxGraphErr::DuplicateValue(name.to_string()));
         }
         Ok(())
     }
 
-    /// Look up a value from the innermost matching scope.
+    /// Look up a value, starting from the innermost scope.
     pub fn lookup(&self, name: &str) -> Option<Value> {
         self.scopes
             .iter()
             .rev()
-            .find_map(|scope| scope.get(name).copied())
+            .find_map(|scope| scope.names.get(name).copied())
+    }
+
+    /// Insert the materialized static constant `id` in the current scope.
+    pub fn insert_static(&mut self, id: DataId, value: Value) {
+        self.current().statics.insert(id, value);
+    }
+
+    /// Look up the static constant `id`, starting from the innermost scope.
+    pub fn lookup_static(&self, id: DataId) -> Option<Value> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.statics.get(&id).copied())
+    }
+
+    /// The innermost scope.
+    fn current(&mut self) -> &mut Scope {
+        self.scopes
+            .last_mut()
+            .expect("the stack always has one scope or more")
     }
 }
 
@@ -255,18 +292,39 @@ fn build_node(
             expect_arity(node, matmul.inputs.len(), 2, matmul.outputs.len(), 1)?;
             let lhs = resolve_operand(ctx, ins, scopes, &matmul.inputs[0], &matmul.name)?;
             let rhs = resolve_operand(ctx, ins, scopes, &matmul.inputs[1], &matmul.name)?;
-            let inferred = value_shape(ctx, lhs.get_type(ctx))
-                .zip(value_shape(ctx, rhs.get_type(ctx)))
-                .and_then(|(lhs, rhs)| matmul_shapes(&lhs, &rhs))
-                .map(|shapes| shapes.result);
             let declared = arg_type_to_type(ctx, &matmul.outputs[0].ty)?;
-            let result_ty = TypedHandle::<RankedTensorType>::from_handle(
-                refine_result_type(ctx, node, declared, inferred)?,
-                ctx,
+            let result = append_matmul(ctx, ins, node, lhs, rhs, declared)?;
+            Ok(vec![result])
+        }
+
+        // ONNX doesn't have a `Linear` operator, but burn produces it in the following cases:
+        // - A `Gemm` with `alpha = beta = 1`, `transA = 0` and `transB = 1`.
+        //   Since its weight is `[out, in]` (`transB = 1`), it must be transposed.
+        // - A `MatMul` with a constant 2-D weight, and an optional bias `Add` after it.
+        Node::Linear(linear) => {
+            let num_inputs = linear.inputs.len().clamp(2, 3);
+            expect_arity(
+                node,
+                linear.inputs.len(),
+                num_inputs,
+                linear.outputs.len(),
+                1,
             )?;
-            let op = MatMulOp::new(ctx, lhs, rhs, result_ty);
-            let result = op.get_result(ctx);
-            ins.append_op(ctx, &op);
+            let input = resolve_operand(ctx, ins, scopes, &linear.inputs[0], &linear.name)?;
+            let weight = if linear.config.transpose_weight {
+                materialize_transposed_constant(ctx, ins, &linear.inputs[1])?
+            } else {
+                resolve_operand(ctx, ins, scopes, &linear.inputs[1], &linear.name)?
+            };
+            let declared = arg_type_to_type(ctx, &linear.outputs[0].ty)?;
+            let product = append_matmul(ctx, ins, node, input, weight, declared)?;
+            let result = match linear.inputs.get(2) {
+                Some(bias) if !matches!(bias.value_source, ValueSource::Optional) => {
+                    let bias = resolve_operand(ctx, ins, scopes, bias, &linear.name)?;
+                    append_binary(ctx, ins, node, product, bias, declared, AddOp::new)?
+                }
+                _ => product,
+            };
             Ok(vec![result])
         }
 
@@ -322,6 +380,22 @@ fn build_binary<T: Op>(
     let lhs = resolve_operand(ctx, ins, scopes, &inputs[0], node.name())?;
     let rhs = resolve_operand(ctx, ins, scopes, &inputs[1], node.name())?;
     let declared = arg_type_to_type(ctx, &outputs[0].ty)?;
+    let result = append_binary(ctx, ins, node, lhs, rhs, declared, new_op)?;
+    Ok(vec![result])
+}
+
+/// Append a broadcasting binary operation on `lhs` and `rhs`, and return its result.
+///
+/// The `declared` result type is refined with the broadcast shape of the operands.
+fn append_binary<T: Op>(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    node: &Node,
+    lhs: Value,
+    rhs: Value,
+    declared: TypeHandle,
+    new_op: fn(&mut Context, Value, Value, TypeHandle) -> T,
+) -> Result<Value> {
     let inferred = value_shape(ctx, lhs.get_type(ctx))
         .zip(value_shape(ctx, rhs.get_type(ctx)))
         .and_then(|(lhs, rhs)| broadcast_shapes(&lhs, &rhs));
@@ -329,7 +403,32 @@ fn build_binary<T: Op>(
     let op = new_op(ctx, lhs, rhs, result_ty);
     let result = op.get_operation().deref(ctx).get_result(0);
     ins.append_op(ctx, &op);
-    Ok(vec![result])
+    Ok(result)
+}
+
+/// Append the matrix product of `lhs` and `rhs`, and return its result.
+///
+/// The `declared` result type is refined with the product shape of the operands.
+fn append_matmul(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    node: &Node,
+    lhs: Value,
+    rhs: Value,
+    declared: TypeHandle,
+) -> Result<Value> {
+    let inferred = value_shape(ctx, lhs.get_type(ctx))
+        .zip(value_shape(ctx, rhs.get_type(ctx)))
+        .and_then(|(lhs, rhs)| matmul_shapes(&lhs, &rhs))
+        .map(|shapes| shapes.result);
+    let result_ty = TypedHandle::<RankedTensorType>::from_handle(
+        refine_result_type(ctx, node, declared, inferred)?,
+        ctx,
+    )?;
+    let op = MatMulOp::new(ctx, lhs, rhs, result_ty);
+    let result = op.get_result(ctx);
+    ins.append_op(ctx, &op);
+    Ok(result)
 }
 
 /// Refine the `declared` tensor type of a node result with its `inferred` shape.
@@ -388,9 +487,24 @@ fn resolve_operand(
             .ok_or_else(|| input_error_noloc!(FromOnnxGraphErr::UndefinedValue(arg.name.clone()))),
 
         // Constant nodes may have been folded away; fall back to the argument data.
-        ValueSource::Constant | ValueSource::Static(_) => match scopes.lookup(&arg.name) {
+        // Materialize each constant once, and share it with all its other uses.
+        ValueSource::Constant => match scopes.lookup(&arg.name) {
             Some(value) => Ok(value),
-            None => materialize_shared_constant(ctx, ins, scopes, arg),
+            None => {
+                let value = materialize_constant(ctx, ins, arg, arg)?;
+                name_value(ctx, value, &arg.name);
+                scopes.insert(&arg.name, value)?;
+                Ok(value)
+            }
+        },
+
+        ValueSource::Static(id) => match scopes.lookup_static(id) {
+            Some(value) => Ok(value),
+            None => {
+                let value = materialize_constant(ctx, ins, arg, arg)?;
+                scopes.insert_static(id, value);
+                Ok(value)
+            }
         },
 
         ValueSource::Optional => input_err_noloc!(FromOnnxGraphErr::OptionalInput(
@@ -398,19 +512,6 @@ fn resolve_operand(
             node_name.to_string()
         )),
     }
-}
-
-/// Materialize a constant argument once, and share it with all its other uses.
-fn materialize_shared_constant(
-    ctx: &mut Context,
-    ins: &mut OpInserter,
-    scopes: &mut ValueScopes,
-    arg: &Argument,
-) -> Result<Value> {
-    let value = materialize_constant(ctx, ins, arg, arg)?;
-    name_value(ctx, value, &arg.name);
-    scopes.insert(&arg.name, value)?;
-    Ok(value)
 }
 
 /// Constant nodes carry data on the input and the result type on the output.
@@ -425,6 +526,50 @@ fn materialize_constant(
     })?;
     let result_ty = arg_type_to_type(ctx, &result_arg.ty)?;
     let value_attr = constant_value_attr(ctx, &data, result_ty)?;
+
+    let op = ConstantOp::new(ctx, value_attr);
+    let result = op.get_result(ctx);
+    ins.append_op(ctx, &op);
+    Ok(result)
+}
+
+/// Swap `arg`'s two dimensions into a new result.
+fn materialize_transposed_constant(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    arg: &Argument,
+) -> Result<Value> {
+    let data = arg.value().ok_or_else(|| {
+        input_error_noloc!(FromOnnxGraphErr::MissingConstantData(arg.name.clone()))
+    })?;
+    let element_size = data.dtype().size();
+    let bytes = data.as_bytes();
+    let &[rows, cols] = &data.shape()[..] else {
+        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(arg.name.clone()));
+    };
+    if bytes.len() != rows * cols * element_size {
+        return input_err_noloc!(FromOnnxGraphErr::MissingConstantData(arg.name.clone()));
+    }
+
+    let mut transposed = Vec::with_capacity(bytes.len());
+    for col in 0..cols {
+        for row in 0..rows {
+            let start = (row * cols + col) * element_size;
+            transposed.extend_from_slice(&bytes[start..start + element_size]);
+        }
+    }
+
+    let ArgType::Tensor(tensor_ty) = &arg.ty else {
+        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(arg.name.clone()));
+    };
+    let element_type = dtype_to_type(ctx, tensor_ty.dtype)?;
+    let result_ty: TypeHandle = RankedTensorType::get(
+        ctx,
+        element_type,
+        vec![Dimension::Static(cols), Dimension::Static(rows)],
+    )
+    .into();
+    let value_attr = constant_value_attr_from_bytes(ctx, data.dtype(), transposed, result_ty)?;
 
     let op = ConstantOp::new(ctx, value_attr);
     let result = op.get_result(ctx);

@@ -19,6 +19,7 @@ fn main() {
         "div/div_broadcast.onnx",
         "matmul/matmul.onnx",
         "matmul/matmul_ranks.onnx",
+        "linear/linear.onnx",
         "constant/constant_f32.onnx",
         "constant/constant_tensor_f32.onnx",
         "cast/cast.onnx",
