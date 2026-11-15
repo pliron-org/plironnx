@@ -40,6 +40,7 @@ use pliron_llvm::{
 use pliron_tensor::{
     memref::{
         attributes::DenseElementsAttr,
+        op_interfaces::TransposeOpInterface,
         type_interfaces::{DenseElementTypeHandle, Dimension, MultiDimensionalType, ShapedType},
     },
     tensor::{
@@ -48,6 +49,7 @@ use pliron_tensor::{
             ConstantOp as TensorConstantOp, DivOp as TensorDivOp, ElementwiseCastOp, ExtractOp,
             MatMulOp as TensorMatMulOp, MaxOp as TensorMaxOp, MulOp as TensorMulOp,
             ReshapeOp as TensorReshapeOp, SplatOp, SubOp as TensorSubOp,
+            TransposeOp as TensorTransposeOp,
         },
         types::RankedTensorType,
     },
@@ -55,7 +57,7 @@ use pliron_tensor::{
 
 use crate::onnx::ops::{
     AddOp, BroadcastableBinaryOpInterface, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp,
-    ReshapeOp, SubOp, matmul_shapes,
+    ReshapeOp, SubOp, TransposeOp, matmul_shapes,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -496,7 +498,33 @@ impl ToTensorDialect for ReshapeOp {
         require_static_result(ctx, self, result_type)?;
         let op = TensorReshapeOp::new(ctx, self.get_operand(ctx), vec![], result_type);
         rewriter.append_op(ctx, &op);
-        rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![op.get_result(ctx)]);
+        rewriter.replace_operation(ctx, self.get_operation(), op.get_operation());
+        Ok(())
+    }
+}
+
+/// Lowers `onnx.transpose` to `tensor.transpose`:
+///
+/// ```text
+/// %r = onnx.transpose %t [1, 0] : tensor<3x2xf32>
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %r = tensor.transpose %t [1, 0] : tensor<3x2xf32>
+/// ```
+#[op_interface_impl]
+impl ToTensorDialect for TransposeOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        let op = TensorTransposeOp::new(ctx, self.source(ctx), self.permutation(ctx));
+        rewriter.append_op(ctx, &op);
+        rewriter.replace_operation(ctx, self.get_operation(), op.get_operation());
         Ok(())
     }
 }

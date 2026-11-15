@@ -35,7 +35,7 @@ use crate::common::onnx_tests_dir;
 
 /// Snapshot the ONNX, tensor, and final Pliron LLVM-dialect IR for a test model.
 ///
-/// `input` is relative to the upstream `onnx-tests/tests` directory;
+/// `input` may be absolute, or relative to the upstream `onnx-tests/tests` directory;
 /// `expect_files` are relative to this crate's `tests/resources` directory.
 pub fn assert_ir_snapshots(input: impl AsRef<Path>, expect_files: [&str; 3]) {
     let graph =

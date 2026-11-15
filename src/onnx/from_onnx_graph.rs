@@ -4,7 +4,8 @@
 //! Build ONNX dialect IR from a topologically ordered burn-onnx graph.
 
 use onnx_ir::{
-    ArgType, Argument, DataId, Node, OnnxGraph, ValueSource, node::reshape::ReshapeInput,
+    ArgType, Argument, DType, DataId, Node, OnnxGraph, TensorData, ValueSource,
+    node::reshape::ReshapeInput,
 };
 
 use pliron::{
@@ -33,16 +34,16 @@ use crate::onnx::{
     attributes::{constant_value_attr, constant_value_attr_from_bytes},
     ops::{
         AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp, ReshapeOp, ReturnOp, SubOp,
-        matmul_shapes,
+        TransposeOp, matmul_shapes,
     },
     types::{
-        arg_type_to_type, dtype_to_type, is_arg_element_signed, is_arg_element_unsigned,
+        arg_dtype, arg_type_to_type, dtype_to_type, is_arg_element_signed, is_arg_element_unsigned,
         value_shape,
     },
 };
 use pliron_tensor::memref::type_interfaces::{Dimension, MultiDimensionalType, ShapedType};
 use pliron_tensor::tensor::attributes::CastSignednessAttr;
-use pliron_tensor::tensor::types::{RankedTensorType, broadcast_shapes};
+use pliron_tensor::tensor::types::{RankedTensorType, broadcast_shapes, can_broadcast_to};
 
 type OpInserter = IRInserter<DummyListener>;
 
@@ -70,14 +71,31 @@ pub enum FromOnnxGraphErr {
     OptionalInput(String, String),
     #[error("The argument `{0}` must hold a constant, but it has no data")]
     MissingConstantData(String),
-    #[error("The constant `{0}` must be a 2-D tensor")]
-    NotAMatrix(String),
+    #[error("The argument `{0}` of the node `{1}` must be a 2-D tensor")]
+    NotAMatrix(String, String),
     #[error("The node `{0}` needs a compile-time reshape shape")]
     DynamicReshapeShape(String),
+    #[error("The node `{node}` reshapes to {result}, which has a dynamic extent")]
+    DynamicReshapeResult { node: String, result: String },
     #[error("The node `{0}` divides unsigned integers, which is not supported")]
     UnsignedIntegerDiv(String),
     #[error("The node `{0}` applies Relu to unsigned integers, which ONNX does not permit")]
     UnsignedIntegerRelu(String),
+    #[error(
+        "The node `{node}` scales {dtype} elements by {scale}, \
+         which is not a value of that element type"
+    )]
+    ScaleNotRepresentable {
+        node: String,
+        dtype: String,
+        scale: f32,
+    },
+    #[error("The node `{node}` has a bias of shape {bias}, which does not broadcast to {result}")]
+    BiasNotBroadcastable {
+        node: String,
+        bias: String,
+        result: String,
+    },
     #[error(
         "The node `{node}` declares a result extent {declared}, but its operands give {inferred}"
     )]
@@ -242,8 +260,8 @@ fn build_node(
     match node {
         Node::Constant(constant) => {
             expect_arity(node, constant.inputs.len(), 1, constant.outputs.len(), 1)?;
-            let value = materialize_constant(ctx, ins, &constant.inputs[0], &constant.outputs[0])?;
-            Ok(vec![value])
+            // Constants are materialized by `resolve_operand` at their first use.
+            Ok(vec![])
         }
 
         Node::Add(add) => build_binary(
@@ -313,11 +331,14 @@ fn build_node(
                 1,
             )?;
             let input = resolve_operand(ctx, ins, scopes, &linear.inputs[0], &linear.name)?;
-            let weight = if linear.config.transpose_weight {
-                materialize_transposed_constant(ctx, ins, &linear.inputs[1])?
-            } else {
-                resolve_operand(ctx, ins, scopes, &linear.inputs[1], &linear.name)?
-            };
+            let weight = resolve_matrix_operand(
+                ctx,
+                ins,
+                scopes,
+                &linear.inputs[1],
+                linear.config.transpose_weight,
+                &linear.name,
+            )?;
             let declared = arg_type_to_type(ctx, &linear.outputs[0].ty)?;
             let product = append_matmul(ctx, ins, node, input, weight, declared)?;
             let result = match linear.inputs.get(2) {
@@ -327,6 +348,61 @@ fn build_node(
                 }
                 _ => product,
             };
+            Ok(vec![result])
+        }
+
+        // `Y = alpha * A' * B' + beta * C`, where
+        // - `A' = transpose(A) if transA else A`
+        // - `B' = transpose(B) if transB else B`
+        Node::Gemm(gemm) => {
+            let num_inputs = gemm.inputs.len().clamp(2, 3);
+            expect_arity(node, gemm.inputs.len(), num_inputs, gemm.outputs.len(), 1)?;
+            let config = &gemm.config;
+            let lhs = resolve_matrix_operand(
+                ctx,
+                ins,
+                scopes,
+                &gemm.inputs[0],
+                config.trans_a != 0,
+                &gemm.name,
+            )?;
+            let rhs = resolve_matrix_operand(
+                ctx,
+                ins,
+                scopes,
+                &gemm.inputs[1],
+                config.trans_b != 0,
+                &gemm.name,
+            )?;
+            let declared = arg_type_to_type(ctx, &gemm.outputs[0].ty)?;
+            let dtype = arg_dtype(&gemm.outputs[0].ty)
+                .expect("a Gemm result must be a tensor with an element type");
+
+            let product = append_matmul(ctx, ins, node, lhs, rhs, declared)?;
+            let product_ty = product.get_type(ctx);
+            let mut result = append_scaled(ctx, ins, node, (product, dtype), config.alpha)?;
+
+            // As in the ONNX reference, ignore `C` when `beta` is 0, even if `C` holds NaN.
+            if let Some(bias) = gemm.inputs.get(2)
+                && !matches!(bias.value_source, ValueSource::Optional)
+                && config.beta != 0.0
+            {
+                let bias = resolve_operand(ctx, ins, scopes, bias, &gemm.name)?;
+                // ONNX broadcasts the bias to the shape of the product, but not the reverse.
+                let bias_shape = value_shape(ctx, bias.get_type(ctx));
+                let product_shape = value_shape(ctx, product_ty);
+                if let (Some(bias_shape), Some(product_shape)) = (bias_shape, product_shape)
+                    && !can_broadcast_to(&bias_shape, &product_shape)
+                {
+                    return input_err_noloc!(FromOnnxGraphErr::BiasNotBroadcastable {
+                        node: gemm.name.clone(),
+                        bias: bias.get_type(ctx).disp(ctx).to_string(),
+                        result: product_ty.disp(ctx).to_string(),
+                    });
+                }
+                let bias = append_scaled(ctx, ins, node, (bias, dtype), config.beta)?;
+                result = append_binary(ctx, ins, node, result, bias, product_ty, AddOp::new)?;
+            }
             Ok(vec![result])
         }
 
@@ -359,6 +435,28 @@ fn build_node(
             Ok(vec![result])
         }
 
+        // Flatten is a reshape to `[product(dims[..axis]), product(dims[axis..])]`.
+        Node::Flatten(flatten) => {
+            expect_arity(node, flatten.inputs.len(), 1, flatten.outputs.len(), 1)?;
+            let input = resolve_operand(ctx, ins, scopes, &flatten.inputs[0], &flatten.name)?;
+            let declared = arg_type_to_type(ctx, &flatten.outputs[0].ty)?;
+            let inferred = value_shape(ctx, input.get_type(ctx))
+                .filter(|shape| flatten.config.axis <= shape.len())
+                .map(|shape| {
+                    let (outer, inner) = shape.split_at(flatten.config.axis);
+                    vec![dimension_product(outer), dimension_product(inner)]
+                });
+            let result_ty = TypedHandle::<RankedTensorType>::from_handle(
+                refine_result_type(ctx, node, declared, inferred)?,
+                ctx,
+            )?;
+            require_static_reshape(ctx, node, result_ty)?;
+            let op = ReshapeOp::new(ctx, input, result_ty);
+            let result = op.get_result(ctx);
+            ins.append_op(ctx, &op);
+            Ok(vec![result])
+        }
+
         Node::Reshape(reshape) => {
             expect_arity(node, reshape.inputs.len(), 2, reshape.outputs.len(), 1)?;
             if !matches!(reshape.config.shape, ReshapeInput::Static(_)) {
@@ -371,6 +469,7 @@ fn build_node(
                 arg_type_to_type(ctx, &reshape.outputs[0].ty)?,
                 ctx,
             )?;
+            require_static_reshape(ctx, node, result_ty)?;
             let op = ReshapeOp::new(ctx, input, result_ty);
             let result = op.get_result(ctx);
             ins.append_op(ctx, &op);
@@ -446,6 +545,110 @@ fn append_matmul(
     Ok(result)
 }
 
+/// Check that the reshape `node` has a static result type.
+fn require_static_reshape(
+    ctx: &Context,
+    node: &Node,
+    result_ty: TypedHandle<RankedTensorType>,
+) -> Result<()> {
+    if result_ty.deref(ctx).num_dynamic_dimensions() != 0 {
+        let result_ty: TypeHandle = result_ty.into();
+        return input_err_noloc!(FromOnnxGraphErr::DynamicReshapeResult {
+            node: node.name().to_string(),
+            result: result_ty.disp(ctx).to_string(),
+        });
+    }
+    Ok(())
+}
+
+/// Product of `dims`, or [Dimension::Dynamic] if one of `dims` is dynamic.
+fn dimension_product(dims: &[Dimension]) -> Dimension {
+    dims.iter()
+        .try_fold(1, |product, dim| match dim {
+            Dimension::Static(extent) => Some(product * extent),
+            Dimension::Dynamic => None,
+        })
+        .map_or(Dimension::Dynamic, Dimension::Static)
+}
+
+/// Resolve the matrix operand `arg`, and `transpose` it if set.
+///
+/// A constant is transposed at import time, and a runtime value with `onnx.transpose`.
+fn resolve_matrix_operand(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    scopes: &mut ValueScopes,
+    arg: &Argument,
+    transpose: bool,
+    node_name: &str,
+) -> Result<Value> {
+    let is_constant = matches!(
+        arg.value_source,
+        ValueSource::Constant | ValueSource::Static(_)
+    );
+    if transpose && is_constant {
+        return materialize_transposed_constant(ctx, ins, arg, node_name);
+    }
+    let value = resolve_operand(ctx, ins, scopes, arg, node_name)?;
+    if value_shape(ctx, value.get_type(ctx)).is_none_or(|shape| shape.len() != 2) {
+        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(
+            arg.name.clone(),
+            node_name.to_string()
+        ));
+    }
+    if !transpose {
+        return Ok(value);
+    }
+    let op = TransposeOp::new(ctx, value, vec![1, 0]);
+    let result = op.get_result(ctx);
+    ins.append_op(ctx, &op);
+    Ok(result)
+}
+
+/// Append `value * scale` and return its result.
+///
+/// For an integer `dtype`, `scale` must be an integer in the range of `dtype`.
+/// `dtype` provides signedness that was lost in [dtype_to_type] for `value`.
+fn append_scaled(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    node: &Node,
+    (value, dtype): (Value, DType),
+    scale: f32,
+) -> Result<Value> {
+    if scale == 1.0 {
+        return Ok(value);
+    }
+    if !dtype.is_float() {
+        let (min, max): (i128, i128) = match dtype {
+            DType::I8 => (i8::MIN.into(), i8::MAX.into()),
+            DType::I16 => (i16::MIN.into(), i16::MAX.into()),
+            DType::I32 => (i32::MIN.into(), i32::MAX.into()),
+            DType::I64 => (i64::MIN.into(), i64::MAX.into()),
+            DType::U8 => (0, u8::MAX.into()),
+            DType::U16 => (0, u16::MAX.into()),
+            DType::U32 => (0, u32::MAX.into()),
+            DType::U64 => (0, u64::MAX.into()),
+            _ => (1, 0),
+        };
+        // `as` saturates, and the range of `i128` contains all the ranges above.
+        if scale.fract() != 0.0 || !(min..=max).contains(&(scale as i128)) {
+            return input_err_noloc!(FromOnnxGraphErr::ScaleNotRepresentable {
+                node: node.name().to_string(),
+                dtype: format!("{dtype:?}"),
+                scale,
+            });
+        }
+    }
+    let data = TensorData::new(vec![scale], Vec::<usize>::new()).convert_dtype(dtype);
+    let element_type = dtype_to_type(ctx, dtype)?;
+    let scale_op = ConstantOp::new(ctx, constant_value_attr(ctx, &data, element_type)?);
+    ins.append_op(ctx, &scale_op);
+    let scale = scale_op.get_result(ctx);
+    let value_ty = value.get_type(ctx);
+    append_binary(ctx, ins, node, value, scale, value_ty, MulOp::new)
+}
+
 /// Refine the `declared` tensor type of a node result with its `inferred` shape.
 ///
 /// Each extent is computed as `declared ⊓ inferred`,
@@ -501,12 +704,11 @@ fn resolve_operand(
             .lookup(&arg.name)
             .ok_or_else(|| input_error_noloc!(FromOnnxGraphErr::UndefinedValue(arg.name.clone()))),
 
-        // Constant nodes may have been folded away; fall back to the argument data.
-        // Materialize each constant once, and share it with all its other uses.
+        // Materialize a constant at its first use, and share it with all its other uses.
         ValueSource::Constant => match scopes.lookup(&arg.name) {
             Some(value) => Ok(value),
             None => {
-                let value = materialize_constant(ctx, ins, arg, arg)?;
+                let value = materialize_constant(ctx, ins, arg)?;
                 name_value(ctx, value, &arg.name);
                 scopes.insert(&arg.name, value)?;
                 Ok(value)
@@ -516,7 +718,7 @@ fn resolve_operand(
         ValueSource::Static(id) => match scopes.lookup_static(id) {
             Some(value) => Ok(value),
             None => {
-                let value = materialize_constant(ctx, ins, arg, arg)?;
+                let value = materialize_constant(ctx, ins, arg)?;
                 scopes.insert_static(id, value);
                 Ok(value)
             }
@@ -529,17 +731,12 @@ fn resolve_operand(
     }
 }
 
-/// Constant nodes carry data on the input and the result type on the output.
-fn materialize_constant(
-    ctx: &mut Context,
-    ins: &mut OpInserter,
-    data_arg: &Argument,
-    result_arg: &Argument,
-) -> Result<Value> {
-    let data = data_arg.value().ok_or_else(|| {
-        input_error_noloc!(FromOnnxGraphErr::MissingConstantData(data_arg.name.clone()))
+/// Materialize the constant `arg` as a new `onnx.constant`.
+fn materialize_constant(ctx: &mut Context, ins: &mut OpInserter, arg: &Argument) -> Result<Value> {
+    let data = arg.value().ok_or_else(|| {
+        input_error_noloc!(FromOnnxGraphErr::MissingConstantData(arg.name.clone()))
     })?;
-    let result_ty = arg_type_to_type(ctx, &result_arg.ty)?;
+    let result_ty = arg_type_to_type(ctx, &arg.ty)?;
     let value_attr = constant_value_attr(ctx, &data, result_ty)?;
 
     let op = ConstantOp::new(ctx, value_attr);
@@ -553,6 +750,7 @@ fn materialize_transposed_constant(
     ctx: &mut Context,
     ins: &mut OpInserter,
     arg: &Argument,
+    node_name: &str,
 ) -> Result<Value> {
     let data = arg.value().ok_or_else(|| {
         input_error_noloc!(FromOnnxGraphErr::MissingConstantData(arg.name.clone()))
@@ -560,7 +758,10 @@ fn materialize_transposed_constant(
     let element_size = data.dtype().size();
     let bytes = data.as_bytes();
     let &[rows, cols] = &data.shape()[..] else {
-        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(arg.name.clone()));
+        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(
+            arg.name.clone(),
+            node_name.to_string()
+        ));
     };
     if bytes.len() != rows * cols * element_size {
         return input_err_noloc!(FromOnnxGraphErr::MissingConstantData(arg.name.clone()));
@@ -575,7 +776,10 @@ fn materialize_transposed_constant(
     }
 
     let ArgType::Tensor(tensor_ty) = &arg.ty else {
-        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(arg.name.clone()));
+        return input_err_noloc!(FromOnnxGraphErr::NotAMatrix(
+            arg.name.clone(),
+            node_name.to_string()
+        ));
     };
     let element_type = dtype_to_type(ctx, tensor_ty.dtype)?;
     let result_ty: TypeHandle = RankedTensorType::get(

@@ -6,6 +6,8 @@
 // Each test crate includes this module and uses only some of its helpers.
 #![allow(dead_code)]
 
+use std::path::Path;
+
 use burn::tensor::{Tensor, TensorData};
 use pliron::{
     builtin::ops::ModuleOp, context::Context, irfmt::parsers::spaced, op::verify_op,
@@ -20,13 +22,13 @@ use plironnx::{
 
 use super::common;
 
-/// Compile `model_path` (relative to [common::onnx_tests_dir]) and
-/// call its packed entry point once.
+/// Compile `model_path` and call its packed entry point once.
+/// `model_path` may be absolute, or relative to [common::onnx_tests_dir].
 ///
 /// Each entry of `inputs` points to a tensor descriptor or to a scalar value.
 /// Each entry of `outputs` points to storage for a tensor descriptor (see
 /// [`build_empty_output_descriptor`]) or for a scalar value.
-pub fn run_packed(model_path: &str, inputs: &[*const u8], outputs: &[*mut u8]) {
+pub fn run_packed(model_path: impl AsRef<Path>, inputs: &[*const u8], outputs: &[*mut u8]) {
     let graph = parse_onnx_file(common::onnx_tests_dir().join(model_path))
         .expect("failed to parse ONNX test model");
     let ctx = &mut Context::new();
@@ -118,8 +120,9 @@ pub fn read_f32_output<const D: usize>(descriptor: &[u8], shape: [usize; D]) -> 
 
 /// Compile and run a test model with one f32 tensor input and one f32 tensor output.
 /// `output_shape` (of any rank) specifies the expected static output dimensions.
+/// `model_path` may be absolute, or relative to [common::onnx_tests_dir].
 pub fn run_single_f32<const INPUT_D: usize, const OUTPUT_D: usize>(
-    model_path: &str,
+    model_path: impl AsRef<Path>,
     input: &Tensor<INPUT_D>,
     output_shape: [usize; OUTPUT_D],
 ) -> Tensor<OUTPUT_D> {

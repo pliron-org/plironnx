@@ -1,0 +1,14 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x3x4x5 : builtin.fp32 >) -> (tensor.ranked <6x20 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(a_v0: tensor.ranked <2x3x4x5 : builtin.fp32 >) !0:
+        flatten1_out1_v2 = tensor.reshape a_v0 : tensor.ranked <6x20 : builtin.fp32 > !1;
+        onnx.return flatten1_out1_v2
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [a]]
+!1 = [builtin_given_names = builtin.given_names [flatten1_out1]]

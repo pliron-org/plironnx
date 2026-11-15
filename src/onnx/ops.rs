@@ -27,7 +27,9 @@ use pliron::{
 use pliron_common_dialects::index::types::IndexType;
 use pliron_tensor::{
     memref::{
-        op_interfaces::{DynamicDimensionOperandsOp, ReshapeOpInterface},
+        attributes::PermutationAttr,
+        layout::permute,
+        op_interfaces::{DynamicDimensionOperandsOp, ReshapeOpInterface, TransposeOpInterface},
         type_interfaces::{Dimension, MultiDimensionalType, ShapedType},
     },
     tensor::{
@@ -602,6 +604,56 @@ impl ReshapeOp {
         result_type: TypedHandle<RankedTensorType>,
     ) -> Self {
         Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![input], vec![], 0)
+    }
+}
+
+/// [Permute](permute) the dimensions of a tensor by the given
+/// [permutation](PermutationAttr), so that for each source index `j`,
+/// `result[permute(j, permutation)] = source[j]`.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `source` | The source ranked tensor. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | A ranked tensor with the permuted shape of `source`. |
+#[pliron_op(
+    name = "onnx.transpose",
+    format = "$0 ` ` attr($memref_transpose_permutation, $PermutationAttr) ` : ` type($0)",
+    interfaces = [
+        OneOpdInterface,
+        OneResultInterface,
+        OperandNOfType<0, RankedTensorType>,
+        ResultNOfType<0, RankedTensorType>,
+        TransposeOpInterface<RankedTensorType>,
+    ],
+    verifier = "succ",
+)]
+pub struct TransposeOp;
+
+impl TransposeOp {
+    /// Create a new `TransposeOp` with the result type inferred.
+    pub fn new(ctx: &mut Context, source: Value, permutation: Vec<usize>) -> Self {
+        let (element_type, shape) = {
+            let source_ty = source.get_type(ctx);
+            let source_ty = source_ty.deref(ctx);
+            let source_ty = source_ty
+                .downcast_ref::<RankedTensorType>()
+                .expect("onnx.transpose source must be ranked");
+            (
+                source_ty.element_type(),
+                permute(source_ty.shape(), &permutation),
+            )
+        };
+        let result_type = RankedTensorType::get(ctx, element_type, shape);
+        let op = Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![source], vec![], 0);
+        op.set_permutation(ctx, permutation);
+        op
     }
 }
 

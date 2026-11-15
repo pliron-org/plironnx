@@ -26,3 +26,9 @@ pub fn onnx_tests_dir() -> PathBuf {
         .join("tests")
         .into_std_path_buf()
 }
+
+/// Directory of the test models that this crate owns, one subdirectory per model.
+#[allow(dead_code)]
+pub fn local_models_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+}

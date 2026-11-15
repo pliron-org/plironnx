@@ -1,0 +1,23 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x2 : builtin.fp32 >, tensor.ranked <2x2 : builtin.fp32 >, builtin.fp32 ) -> (tensor.ranked <2x2 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(a_v0: tensor.ranked <2x2 : builtin.fp32 >, b_v1: tensor.ranked <2x2 : builtin.fp32 >, c_v2: builtin.fp32 ) !0:
+        v9 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v10 = tensor.splat v9 : tensor.ranked <2x2 : builtin.fp32 >;
+        v11 = tensor.matmul a_v0, b_v1, v10 : tensor.ranked <2x2 : builtin.fp32 >;
+        v12 = builtin.constant <builtin.single 0.5> : builtin.fp32 ;
+        v13 = tensor.splat v12 : tensor.ranked <2x2 : builtin.fp32 >;
+        v14 = tensor.mul v11, v13 : tensor.ranked <2x2 : builtin.fp32 >;
+        v15 = builtin.constant <builtin.single 0.5> : builtin.fp32 ;
+        v16 = llvm.fmul <> c_v2, v15 : builtin.fp32 ;
+        v17 = tensor.splat v16 : tensor.ranked <2x2 : builtin.fp32 >;
+        gemm1_out1_v18 = tensor.add v14, v17 : tensor.ranked <2x2 : builtin.fp32 > !1;
+        onnx.return gemm1_out1_v18
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [a, b, c]]
+!1 = [builtin_given_names = builtin.given_names [gemm1_out1]]
