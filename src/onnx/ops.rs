@@ -218,6 +218,68 @@ impl DivOp {
     }
 }
 
+/// Rectified linear unit. Elementwise `max(x, 0)`.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `input` | The tensor or scalar, of a float or signed integer type. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The rectified value, with the type of `input`. |
+#[pliron_op(
+    name = "onnx.relu",
+    format = "$0 ` : ` type($0)",
+    interfaces = [OneOpdInterface, NOpdsInterface<1>, OneResultInterface],
+)]
+pub struct ReluOp;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReluOpVerifyErr {
+    #[error(
+        "The operand of onnx.relu has the type {operand}, but the result has the type {result}"
+    )]
+    TypeMismatch { operand: String, result: String },
+    #[error("{0} is not a valid operand type for onnx.relu")]
+    UnsupportedType(String),
+}
+
+impl ReluOp {
+    /// Create a new ReluOp. The result type is the type of `input`.
+    pub fn new(ctx: &mut Context, input: Value) -> Self {
+        let result_type = input.get_type(ctx);
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![input], vec![], 0)
+    }
+}
+
+impl Verify for ReluOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        let loc = self.loc(ctx);
+        let operand_type = self.get_operand(ctx).get_type(ctx);
+        let result_type = self.result_type(ctx);
+        if operand_type != result_type {
+            return verify_err!(
+                loc,
+                ReluOpVerifyErr::TypeMismatch {
+                    operand: operand_type.disp(ctx).to_string(),
+                    result: result_type.disp(ctx).to_string(),
+                }
+            );
+        }
+        if value_element_type(ctx, operand_type).is_none() {
+            return verify_err!(
+                loc,
+                ReluOpVerifyErr::UnsupportedType(operand_type.disp(ctx).to_string())
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Matrix product with NumPy semantics, as defined by ONNX `MatMul`.
 ///
 /// | `lhs`                 | `rhs`                 | `result`      |

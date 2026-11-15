@@ -32,7 +32,7 @@ use pliron::{
 use crate::onnx::{
     attributes::{constant_value_attr, constant_value_attr_from_bytes},
     ops::{
-        AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReshapeOp, ReturnOp, SubOp,
+        AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp, ReshapeOp, ReturnOp, SubOp,
         matmul_shapes,
     },
     types::{
@@ -76,6 +76,8 @@ pub enum FromOnnxGraphErr {
     DynamicReshapeShape(String),
     #[error("The node `{0}` divides unsigned integers, which is not supported")]
     UnsignedIntegerDiv(String),
+    #[error("The node `{0}` applies Relu to unsigned integers, which ONNX does not permit")]
+    UnsignedIntegerRelu(String),
     #[error(
         "The node `{node}` declares a result extent {declared}, but its operands give {inferred}"
     )]
@@ -325,6 +327,19 @@ fn build_node(
                 }
                 _ => product,
             };
+            Ok(vec![result])
+        }
+
+        Node::Relu(relu) => {
+            expect_arity(node, relu.inputs.len(), 1, relu.outputs.len(), 1)?;
+            // Integer types are signless, and a signless maximum compares signed values.
+            if is_arg_element_unsigned(&relu.inputs[0].ty) {
+                return input_err_noloc!(FromOnnxGraphErr::UnsignedIntegerRelu(relu.name.clone()));
+            }
+            let input = resolve_operand(ctx, ins, scopes, &relu.inputs[0], &relu.name)?;
+            let op = ReluOp::new(ctx, input);
+            let result = op.get_result(ctx);
+            ins.append_op(ctx, &op);
             Ok(vec![result])
         }
 

@@ -45,17 +45,17 @@ use pliron_tensor::{
     tensor::{
         ops::{
             AddOp as TensorAddOp, BatchMatMulOp, BroadcastOp as TensorBroadcastOp,
-            ConstantOp as TensorConstantOp, DivOp as TensorDivOp, ElementwiseCastOp,
-            MatMulOp as TensorMatMulOp, MulOp as TensorMulOp, ReshapeOp as TensorReshapeOp,
-            SplatOp, SubOp as TensorSubOp,
+            ConstantOp as TensorConstantOp, DivOp as TensorDivOp, ElementwiseCastOp, ExtractOp,
+            MatMulOp as TensorMatMulOp, MaxOp as TensorMaxOp, MulOp as TensorMulOp,
+            ReshapeOp as TensorReshapeOp, SplatOp, SubOp as TensorSubOp,
         },
         types::RankedTensorType,
     },
 };
 
 use crate::onnx::ops::{
-    AddOp, BroadcastableBinaryOpInterface, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReshapeOp,
-    SubOp, matmul_shapes,
+    AddOp, BroadcastableBinaryOpInterface, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp,
+    ReshapeOp, SubOp, matmul_shapes,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -403,6 +403,70 @@ impl ToTensorDialect for CastOp {
                     }
                 }
             }
+        };
+        rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![result]);
+        Ok(())
+    }
+}
+
+/// Lowers `onnx.relu` to `tensor.max` with a splat of zero.
+/// A scalar operand goes through a rank-0 tensor.
+///
+/// ```text
+/// %r = onnx.relu %t : tensor<2x3xf32>
+/// %s = onnx.relu %x : f32
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %zero = builtin.constant 0.0 : f32
+/// %zeros = tensor.splat %zero : tensor<2x3xf32>
+/// %r = tensor.max %t, %zeros : tensor<2x3xf32>
+///
+/// %x_t = tensor.splat %x : tensor<f32>
+/// %zero_s = builtin.constant 0.0 : f32
+/// %zeros_s = tensor.splat %zero_s : tensor<f32>
+/// %r_t = tensor.max %x_t, %zeros_s : tensor<f32>
+/// %s = tensor.extract %r_t[] : f32
+/// ```
+#[op_interface_impl]
+impl ToTensorDialect for ReluOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        let input = self.get_operand(ctx);
+        let input_type = input.get_type(ctx);
+        let input_tensor_type = ranked_tensor_type(ctx, input);
+        let (tensor, tensor_type) = match input_tensor_type {
+            Some(tensor_type) => {
+                require_static_result(ctx, self, tensor_type)?;
+                (input, tensor_type)
+            }
+            None => {
+                let tensor_type = RankedTensorType::get(ctx, input_type, vec![]);
+                let splat = SplatOp::new(ctx, input, vec![], tensor_type);
+                rewriter.append_op(ctx, &splat);
+                (splat.get_result(ctx), tensor_type)
+            }
+        };
+
+        let element_type = tensor_type.deref(ctx).element_type();
+        let zero = zero_scalar(ctx, rewriter, element_type)?;
+        let zeros = SplatOp::new(ctx, zero, vec![], tensor_type);
+        rewriter.append_op(ctx, &zeros);
+        let max = TensorMaxOp::new(ctx, tensor, zeros.get_result(ctx));
+        rewriter.append_op(ctx, &max);
+
+        let result = if input_tensor_type.is_some() {
+            max.get_result(ctx)
+        } else {
+            let extract = ExtractOp::new(ctx, input_type, max.get_result(ctx), vec![]);
+            rewriter.append_op(ctx, &extract);
+            extract.get_result(ctx)
         };
         rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![result]);
         Ok(())

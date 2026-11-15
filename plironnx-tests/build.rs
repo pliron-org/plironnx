@@ -20,6 +20,7 @@ fn main() {
         "matmul/matmul.onnx",
         "matmul/matmul_ranks.onnx",
         "linear/linear.onnx",
+        "relu/relu.onnx",
         "constant/constant_f32.onnx",
         "constant/constant_tensor_f32.onnx",
         "cast/cast.onnx",
