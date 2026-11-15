@@ -13,9 +13,9 @@ use pliron::{
     result::Result,
 };
 
-use plironnx::{
-    burn_onnx_ir::parse_onnx_file,
-    onnx::{conversions::OnnxToTensor, from_onnx_graph::build_module},
+use plironnx::onnx::{
+    conversions::OnnxToTensor,
+    from_onnx_graph::{build_module, parse_onnx_file},
 };
 
 #[derive(Parser)]

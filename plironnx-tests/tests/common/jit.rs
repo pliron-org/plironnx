@@ -15,9 +15,9 @@ use pliron::{
 };
 use pliron_llvm::llvm_sys::lljit::SimpleJIT;
 use pliron_tensor::tensor::runtime_utils::TensorDesciptor;
-use plironnx::{
-    burn_onnx_ir::parse_onnx_file,
-    onnx::{entrypoint_abi::compile_packed_entrypoint, from_onnx_graph::build_module},
+use plironnx::onnx::{
+    entrypoint_abi::compile_packed_entrypoint,
+    from_onnx_graph::{build_module, parse_onnx_file},
 };
 
 use super::common;

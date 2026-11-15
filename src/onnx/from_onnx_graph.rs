@@ -3,8 +3,10 @@
 
 //! Build ONNX dialect IR from a topologically ordered burn-onnx graph.
 
+use std::path::Path;
+
 use onnx_ir::{
-    ArgType, Argument, DType, DataId, Node, OnnxGraph, TensorData, ValueSource,
+    ArgType, Argument, DType, DataId, Node, OnnxGraph, OnnxGraphBuilder, TensorData, ValueSource,
     node::reshape::ReshapeInput,
 };
 
@@ -180,6 +182,13 @@ impl ValueScopes {
             .last_mut()
             .expect("the stack always has one scope or more")
     }
+}
+
+/// Parse an ONNX model file into its [`OnnxGraph`] intermediate representation.
+pub fn parse_onnx_file(path: impl AsRef<Path>) -> Result<OnnxGraph> {
+    OnnxGraphBuilder::new()
+        .parse_file(path)
+        .map_err(|err| input_error_noloc!(err))
 }
 
 /// Wrap the graph in a module containing one function.

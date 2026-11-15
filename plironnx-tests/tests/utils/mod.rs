@@ -22,13 +22,10 @@ use pliron_tensor::{
     memref::conversions::MemrefToCF,
     tensor::{bufferize::bufferize, memory_management::MallocFreeTMM},
 };
-use plironnx::{
-    burn_onnx_ir::parse_onnx_file,
-    onnx::{
-        conversions::OnnxToTensor,
-        entrypoint_abi::{add_packed_wrapper, lower_model_outputs},
-        from_onnx_graph::build_module,
-    },
+use plironnx::onnx::{
+    conversions::OnnxToTensor,
+    entrypoint_abi::{add_packed_wrapper, lower_model_outputs},
+    from_onnx_graph::{build_module, parse_onnx_file},
 };
 
 use crate::common::onnx_tests_dir;
