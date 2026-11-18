@@ -1,0 +1,24 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x3 : builtin.fp32 >) -> (tensor.ranked <2x3 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(x_v0: tensor.ranked <2x3 : builtin.fp32 >) !0:
+        v6 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v7 = tensor.splat v6 : tensor.ranked <2x1 : builtin.fp32 >;
+        v8 = tensor.reduce <Max> [1] x_v0, v7 : tensor.ranked <2x1 : builtin.fp32 >;
+        v9 = tensor.broadcast v8 : tensor.ranked <2x3 : builtin.fp32 >;
+        v10 = tensor.sub x_v0, v9 : tensor.ranked <2x3 : builtin.fp32 >;
+        v11 = tensor.exp v10 : tensor.ranked <2x3 : builtin.fp32 >;
+        v12 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v13 = tensor.splat v12 : tensor.ranked <2x1 : builtin.fp32 >;
+        v14 = tensor.reduce <Sum> [1] v11, v13 : tensor.ranked <2x1 : builtin.fp32 >;
+        v15 = tensor.broadcast v14 : tensor.ranked <2x3 : builtin.fp32 >;
+        softmax1_out1_v16 = tensor.div v11, v15 : tensor.ranked <2x3 : builtin.fp32 > !1;
+        onnx.return softmax1_out1_v16
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [x]]
+!1 = [builtin_given_names = builtin.given_names [softmax1_out1]]

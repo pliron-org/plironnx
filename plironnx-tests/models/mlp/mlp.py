@@ -7,10 +7,18 @@
 # ]
 # ///
 
-# Generate mlp.onnx: an MNIST-sized multilayer perceptron for
-# `Flatten -> Linear -> ReLU -> Linear`.
+# Generate an MNIST-sized multilayer perceptron for `Flatten -> Linear -> ReLU -> Linear`.
+# It classifies a batch of 3 images of 28x28 pixels into 10 classes (the digits 0-9):
 #
-#   x: [3, 1, 28, 28] -> Flatten -> [3, 784] -> Gemm -> [3, 32] -> Relu -> Gemm -> [3, 10]
+#   x: [batch=3, channel=1, height=28, width=28]
+#     -> Flatten -> [batch, pixels=784]
+#     -> Gemm    -> [batch, hidden=32]
+#     -> Relu    -> [batch, hidden=32]
+#     -> Gemm    -> [batch, class=10]
+#
+# - mlp.onnx produces logits: one score for each class of each image.
+# - mlp_softmax.onnx adds a Softmax classifier head after the logits, along the
+#   class axis, to produce class probabilities.
 
 import numpy as np
 import onnx
@@ -31,7 +39,7 @@ def linear_params(rng, name, fan_in, fan_out):
     ]
 
 
-def build_model():
+def build_model(softmax):
     rng = np.random.default_rng(seed=0)
     initializers = linear_params(rng, "fc1", IN, HIDDEN) + linear_params(
         rng, "fc2", HIDDEN, OUT
@@ -48,11 +56,15 @@ def build_model():
             "Gemm", ["activated", "fc2.weight", "fc2.bias"], ["logits"], alpha=1.0, beta=1.0, transB=1
         ),
     ]
+    output = "logits"
+    if softmax:
+        nodes.append(helper.make_node("Softmax", ["logits"], ["probabilities"], axis=1))
+        output = "probabilities"
     graph = helper.make_graph(
         nodes,
         "mlp",
         [helper.make_tensor_value_info("x", TensorProto.FLOAT, [BATCH, 1, 28, 28])],
-        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [BATCH, OUT])],
+        [helper.make_tensor_value_info(output, TensorProto.FLOAT, [BATCH, OUT])],
         initializer=initializers,
     )
     return helper.make_model(
@@ -61,7 +73,8 @@ def build_model():
 
 
 if __name__ == "__main__":
-    onnx_model = build_model()
-    onnx.checker.check_model(onnx_model)
-    onnx.save(onnx_model, "mlp.onnx")
-    print("Finished exporting model to mlp.onnx")
+    for file_name, softmax in [("mlp.onnx", False), ("mlp_softmax.onnx", True)]:
+        onnx_model = build_model(softmax)
+        onnx.checker.check_model(onnx_model)
+        onnx.save(onnx_model, file_name)
+        print(f"Finished exporting model to {file_name}")

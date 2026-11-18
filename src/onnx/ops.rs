@@ -8,28 +8,32 @@ use pliron::{
     attribute::{AttrObj, attr_cast},
     builtin::{
         attr_interfaces::TypedAttrInterface,
+        attributes::BoolAttr,
         op_interfaces::{
             IsTerminatorInterface, NOpdsInterface, NResultsInterface, OneOpdInterface,
-            OneResultInterface, OperandNOfType, OperandsMNOfType, ResultNImplsTy, ResultNOfType,
+            OneResultInterface, OperandNOfType, ResultNImplsTy, ResultNOfType,
         },
+        type_interfaces::FloatTypeInterface,
     },
     common_traits::Verify,
     context::Context,
-    derive::{op_interface, pliron_op},
+    derive::{op_interface, op_interface_impl, pliron_op},
+    dict_key,
     op::{Op, op_cast},
     operation::Operation,
     printable::Printable,
     result::Result,
-    r#type::{TypeHandle, Typed, TypedHandle},
+    r#type::{TypeHandle, Typed, TypedHandle, type_impls},
     value::Value,
     verify_err, verify_error,
 };
-use pliron_common_dialects::index::types::IndexType;
 use pliron_tensor::{
     memref::{
-        attributes::PermutationAttr,
+        attributes::{PermutationAttr, ReductionDimsAttr},
         layout::permute,
-        op_interfaces::{DynamicDimensionOperandsOp, ReshapeOpInterface, TransposeOpInterface},
+        op_interfaces::{
+            DynamicDimensionOperandsOp, ReshapeOpInterface, TransposeOpInterface, reduced_shape,
+        },
         type_interfaces::{Dimension, MultiDimensionalType, ShapedType},
     },
     tensor::{
@@ -251,7 +255,7 @@ pub enum ReluOpVerifyErr {
 }
 
 impl ReluOp {
-    /// Create a new ReluOp. The result type is the type of `input`.
+    /// Create a new ReluOp. The result type is set to `input`'s type.
     pub fn new(ctx: &mut Context, input: Value) -> Self {
         let result_type = input.get_type(ctx);
         Operation::new_op::<Self>(ctx, vec![result_type], vec![input], vec![], 0)
@@ -279,6 +283,312 @@ impl Verify for ReluOp {
             );
         }
         Ok(())
+    }
+}
+
+/// Elementwise base-e exponential, as defined by ONNX `Exp`.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `input` | The tensor or scalar, of a float type. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The exponential, with the type of `input`. |
+#[pliron_op(
+    name = "onnx.exp",
+    format = "$0 ` : ` type($0)",
+    interfaces = [OneOpdInterface, NOpdsInterface<1>, OneResultInterface],
+)]
+pub struct ExpOp;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExpOpVerifyErr {
+    #[error("The operand of onnx.exp has the type {operand}, but the result has the type {result}")]
+    TypeMismatch { operand: String, result: String },
+    #[error("{0} is not a valid operand type for onnx.exp")]
+    UnsupportedType(String),
+}
+
+impl ExpOp {
+    /// Create a new ExpOp. The result type is set to `input`'s type.
+    pub fn new(ctx: &mut Context, input: Value) -> Self {
+        let result_type = input.get_type(ctx);
+        Operation::new_op::<Self>(ctx, vec![result_type], vec![input], vec![], 0)
+    }
+}
+
+impl Verify for ExpOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        let loc = self.loc(ctx);
+        let operand_type = self.get_operand(ctx).get_type(ctx);
+        let result_type = self.result_type(ctx);
+        if operand_type != result_type {
+            return verify_err!(
+                loc,
+                ExpOpVerifyErr::TypeMismatch {
+                    operand: operand_type.disp(ctx).to_string(),
+                    result: result_type.disp(ctx).to_string(),
+                }
+            );
+        }
+        let is_float = value_element_type(ctx, operand_type)
+            .is_some_and(|ty| type_impls::<dyn FloatTypeInterface>(&*ty.deref(ctx)));
+        if !is_float {
+            return verify_err!(
+                loc,
+                ExpOpVerifyErr::UnsupportedType(operand_type.disp(ctx).to_string())
+            );
+        }
+        Ok(())
+    }
+}
+
+dict_key!(
+    /// Attribute key for the [ReductionDimsAttr] of a [ReduceOpInterface] op.
+    ATTR_KEY_REDUCE_DIMS,
+    "onnx_reduce_dims"
+);
+
+dict_key!(
+    /// Attribute key for the `keepdims` [BoolAttr] of a [ReduceOpInterface] op.
+    ATTR_KEY_REDUCE_KEEPDIMS,
+    "onnx_reduce_keepdims"
+);
+
+#[derive(Debug, thiserror::Error)]
+pub enum ReduceOpVerifyErr {
+    #[error("The reduction has no {ATTR_KEY_REDUCE_DIMS} attribute")]
+    MissingDims,
+    #[error("The reduction has no {ATTR_KEY_REDUCE_KEEPDIMS} attribute")]
+    MissingKeepdims,
+    #[error("The dims {dims:?} must be strictly increasing dimensions of the rank {rank} input")]
+    InvalidDims { dims: Vec<usize>, rank: usize },
+    #[error("The input and the result element types are different: {input} and {result}")]
+    ElementTypeMismatch { input: String, result: String },
+    #[error("The reduction gives the result shape {expected}, but the result has the shape {got}")]
+    ResultShapeMismatch { expected: String, got: String },
+}
+
+/// Compute the result shape when `input_shape` is reduced over `reduced_dims`.
+///
+/// Each dimension of `input_shape` that is in `reduced_dims` is set to 1 if `keepdims`
+/// is set, and is removed otherwise.
+pub fn onnx_reduced_shape(
+    input_shape: &[Dimension],
+    reduced_dims: &[usize],
+    keepdims: bool,
+) -> Vec<Dimension> {
+    if keepdims {
+        return reduced_shape(input_shape, reduced_dims);
+    }
+    input_shape
+        .iter()
+        .enumerate()
+        .filter(|(dim, _)| !reduced_dims.contains(dim))
+        .map(|(_, extent)| extent.clone())
+        .collect()
+}
+
+/// ONNX reductions of a tensor over `reduced_dims`.
+///
+/// ONNX's convention for an empty `axes` is to reduce along all dimensions.
+/// Because our convention is to not reduce at all on an empty `reduced_dims`,
+/// the import translates an empty `axes` into a full `reduced_dims`.
+#[op_interface]
+pub trait ReduceOpInterface:
+    OneOpdInterface
+    + OneResultInterface
+    + OperandNOfType<0, RankedTensorType>
+    + ResultNOfType<0, RankedTensorType>
+{
+    /// Reduced dimensions, in strictly increasing order.
+    fn reduced_dims(&self, ctx: &Context) -> Vec<usize> {
+        self.get_operation()
+            .deref(ctx)
+            .attributes
+            .get::<ReductionDimsAttr>(&ATTR_KEY_REDUCE_DIMS)
+            .expect("the verifier checks that a reduction has reduced dims")
+            .0
+            .clone()
+    }
+
+    /// Are reduced dimensions retained with a unit extent or removed entirely?
+    fn keepdims(&self, ctx: &Context) -> bool {
+        self.get_operation()
+            .deref(ctx)
+            .attributes
+            .get::<BoolAttr>(&ATTR_KEY_REDUCE_KEEPDIMS)
+            .expect("the verifier checks that a reduction has keepdims")
+            .clone()
+            .into()
+    }
+
+    /// Set reduced dimensions and `keepdims`.
+    fn set_reduction(&self, ctx: &Context, reduced_dims: Vec<usize>, keepdims: bool) {
+        let attributes = &mut self.get_operation().deref_mut(ctx).attributes;
+        attributes.set(
+            ATTR_KEY_REDUCE_DIMS.clone(),
+            ReductionDimsAttr(reduced_dims),
+        );
+        attributes.set(ATTR_KEY_REDUCE_KEEPDIMS.clone(), BoolAttr::new(keepdims));
+    }
+
+    // Check reduced dims, element types and the result shape.
+    fn verify(op: &dyn Op, ctx: &Context) -> Result<()>
+    where
+        Self: Sized,
+    {
+        let loc = op.loc(ctx);
+        let op_ref = op.get_operation().deref(ctx);
+        let Some(ReductionDimsAttr(reduced_dims)) = op_ref
+            .attributes
+            .get::<ReductionDimsAttr>(&ATTR_KEY_REDUCE_DIMS)
+        else {
+            return verify_err!(loc, ReduceOpVerifyErr::MissingDims);
+        };
+        let Some(keepdims) = op_ref.attributes.get::<BoolAttr>(&ATTR_KEY_REDUCE_KEEPDIMS) else {
+            return verify_err!(loc, ReduceOpVerifyErr::MissingKeepdims);
+        };
+        let keepdims: bool = keepdims.clone().into();
+
+        let tensor_type = |value: Value| {
+            TypedHandle::<RankedTensorType>::from_handle(value.get_type(ctx), ctx)
+                .expect("the interfaces verify that the operand and the result are ranked tensors")
+        };
+        let input_ty = tensor_type(op_ref.get_operand(0));
+        let result_ty = tensor_type(op_ref.get_result(0));
+        let (input_ty, result_ty) = (input_ty.deref(ctx), result_ty.deref(ctx));
+
+        let rank = input_ty.rank();
+        let increasing = reduced_dims.windows(2).all(|pair| pair[0] < pair[1]);
+        if !increasing || reduced_dims.last().is_some_and(|&last| last >= rank) {
+            return verify_err!(
+                loc,
+                ReduceOpVerifyErr::InvalidDims {
+                    dims: reduced_dims.clone(),
+                    rank
+                }
+            );
+        }
+
+        if input_ty.element_type() != result_ty.element_type() {
+            return verify_err!(
+                loc,
+                ReduceOpVerifyErr::ElementTypeMismatch {
+                    input: input_ty.element_type().disp(ctx).to_string(),
+                    result: result_ty.element_type().disp(ctx).to_string(),
+                }
+            );
+        }
+
+        let expected = onnx_reduced_shape(input_ty.shape(), reduced_dims, keepdims);
+        if !shapes_may_match(&expected, result_ty.shape()) {
+            return verify_err!(
+                loc,
+                ReduceOpVerifyErr::ResultShapeMismatch {
+                    expected: disp_shape(ctx, &expected),
+                    got: disp_shape(ctx, result_ty.shape()),
+                }
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Maximum of the elements over `reduced_dims`, as defined by ONNX `ReduceMax`.
+///
+/// - Unsigned integers compare as unsigned values.
+/// - Signed and signless integers compare as signed values.
+/// - Floats follow IEEE 754-2019 `maximum`:
+///   - a NaN gives NaN
+///   - `-0.0` is less than `+0.0`.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `input` | The tensor to reduce. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The maximum. See [ReduceOpInterface] for its shape. |
+#[pliron_op(
+    name = "onnx.reduce_max",
+    format = "$0 ` ` attr($onnx_reduce_dims, $ReductionDimsAttr) ` keepdims=` attr($onnx_reduce_keepdims, $BoolAttr) ` : ` type($0)",
+    interfaces = [
+        OneOpdInterface,
+        OneResultInterface,
+        OperandNOfType<0, RankedTensorType>,
+        ResultNOfType<0, RankedTensorType>,
+        ReduceOpInterface,
+    ],
+    verifier = "succ",
+)]
+pub struct ReduceMaxOp;
+
+impl ReduceMaxOp {
+    /// Create a new ReduceMaxOp: the maximum of `input` over `reduced_dims`.
+    pub fn new(
+        ctx: &mut Context,
+        input: Value,
+        reduced_dims: Vec<usize>,
+        keepdims: bool,
+        result_type: TypedHandle<RankedTensorType>,
+    ) -> Self {
+        let op = Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![input], vec![], 0);
+        op.set_reduction(ctx, reduced_dims, keepdims);
+        op
+    }
+}
+
+/// Sum of the elements over `reduced_dims`, as defined by ONNX `ReduceSum`.
+///
+/// Integer sums wrap around.
+///
+/// ### Operand(s):
+///
+/// | operand | description |
+/// |-----|-------|
+/// | `input` | The tensor to reduce. |
+///
+/// ### Result(s):
+///
+/// | result | description |
+/// |-----|-------|
+/// | `result` | The sum. See [ReduceOpInterface] for its shape. |
+#[pliron_op(
+    name = "onnx.reduce_sum",
+    format = "$0 ` ` attr($onnx_reduce_dims, $ReductionDimsAttr) ` keepdims=` attr($onnx_reduce_keepdims, $BoolAttr) ` : ` type($0)",
+    interfaces = [
+        OneOpdInterface,
+        OneResultInterface,
+        OperandNOfType<0, RankedTensorType>,
+        ResultNOfType<0, RankedTensorType>,
+        ReduceOpInterface,
+    ],
+    verifier = "succ",
+)]
+pub struct ReduceSumOp;
+
+impl ReduceSumOp {
+    /// Create a new ReduceSumOp: the sum of `input` over `reduced_dims`.
+    pub fn new(
+        ctx: &mut Context,
+        input: Value,
+        reduced_dims: Vec<usize>,
+        keepdims: bool,
+        result_type: TypedHandle<RankedTensorType>,
+    ) -> Self {
+        let op = Operation::new_op::<Self>(ctx, vec![result_type.into()], vec![input], vec![], 0);
+        op.set_reduction(ctx, reduced_dims, keepdims);
+        op
     }
 }
 
@@ -589,13 +899,18 @@ impl Verify for CastOp {
         OperandNOfType<0, RankedTensorType>,
         ResultNOfType<0, RankedTensorType>,
         ResultNImplsTy<0, dyn ShapedType>,
-        OperandsMNOfType<1, {-1}, IndexType>,
-        DynamicDimensionOperandsOp<1>,
         ReshapeOpInterface<RankedTensorType>,
     ],
     verifier = "succ",
 )]
 pub struct ReshapeOp;
+
+#[op_interface_impl]
+impl DynamicDimensionOperandsOp for ReshapeOp {
+    fn get_dynamic_dimensions(&self, ctx: &Context) -> Vec<Value> {
+        self.get_operation().deref(ctx).operands().skip(1).collect()
+    }
+}
 
 impl ReshapeOp {
     pub fn new(

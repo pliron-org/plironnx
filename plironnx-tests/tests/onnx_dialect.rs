@@ -158,3 +158,76 @@ builtin.module @onnx_module
     assert_eq!(rs.to_bits(), 0.0f32.to_bits());
     assert_eq!(rt, 9);
 }
+
+/// Check Exp and the reductions of tensors and of scalars:
+/// - Exp must give 0 for `-inf`, `inf` for `inf`, NaN for NaN and 1 for `-0.0`
+/// - a maximum of signed integers must start from the lowest value, so that a row
+///   of only negative values gives its largest value
+/// - a maximum of unsigned integers must start from 0 and compare unsigned values,
+///   so that a row of values below 2^31 gives its largest value
+/// - an integer sum must wrap.
+#[test]
+fn exp_and_reduce_special_values() {
+    let ir = r#"
+        builtin.module @onnx_module
+        {
+        ^block1():
+            builtin.func @model: builtin.function <(tensor.ranked <4 : builtin.fp32 >, builtin.fp32, tensor.ranked <2x3 : builtin.integer i32>, tensor.ranked <2x3 : builtin.integer ui32>) -> (tensor.ranked <4 : builtin.fp32 >, builtin.fp32, tensor.ranked <2 : builtin.integer i32>, tensor.ranked <1x3 : builtin.integer i32>, tensor.ranked <2 : builtin.integer ui32>)>
+            {
+            ^entry(f: tensor.ranked <4 : builtin.fp32 >, s: builtin.fp32, i: tensor.ranked <2x3 : builtin.integer i32>, u: tensor.ranked <2x3 : builtin.integer ui32>):
+                ef = onnx.exp f : tensor.ranked <4 : builtin.fp32 >;
+                es = onnx.exp s : builtin.fp32;
+                mi = onnx.reduce_max i [1] keepdims=false : tensor.ranked <2 : builtin.integer i32>;
+                si = onnx.reduce_sum i [0] keepdims=true : tensor.ranked <1x3 : builtin.integer i32>;
+                mu = onnx.reduce_max u [1] keepdims=false : tensor.ranked <2 : builtin.integer ui32>;
+                onnx.return ef, es, mi, si, mu
+            }
+        }
+        "#;
+    let f = [f32::NEG_INFINITY, f32::INFINITY, f32::NAN, -0.0];
+    let s = 1.0f32;
+    let i = [i32::MIN, 4, 2, -1, -3, -2];
+    let u = [1u32, 7, 3, 5, u32::MAX, 2];
+
+    let f_data = TensorData::new(f.to_vec(), [4]);
+    let i_data = TensorData::new(i.to_vec(), [2, 3]);
+    let f_descriptor = jit::build_input_descriptor::<f32>(&f_data);
+    let i_descriptor = jit::build_input_descriptor::<i32>(&i_data);
+    let u_data = TensorData::new(u.to_vec(), [2, 3]);
+    let u_descriptor = jit::build_input_descriptor::<u32>(&u_data);
+    let mut ef = jit::build_empty_output_descriptor(1);
+    let mut es = f32::NAN;
+    let mut mi = jit::build_empty_output_descriptor(1);
+    let mut si = jit::build_empty_output_descriptor(2);
+    let mut mu = jit::build_empty_output_descriptor(1);
+    jit::run_packed_ir(
+        ir,
+        &[
+            f_descriptor.as_ptr(),
+            (&raw const s).cast(),
+            i_descriptor.as_ptr(),
+            u_descriptor.as_ptr(),
+        ],
+        &[
+            ef.as_mut_ptr(),
+            (&raw mut es).cast(),
+            mi.as_mut_ptr(),
+            si.as_mut_ptr(),
+            mu.as_mut_ptr(),
+        ],
+    );
+
+    let actual = jit::read_output::<f32>(&ef, &[4]);
+    let expected = [0.0, f32::INFINITY, f32::NAN, 1.0];
+    for (idx, (a, e)) in actual.iter().zip(&expected).enumerate() {
+        // NaN must match NaN, and every other element must match bit for bit.
+        assert!(
+            (a.is_nan() && e.is_nan()) || a.to_bits() == e.to_bits(),
+            "element {idx}: got {a:?}, expected {e:?}"
+        );
+    }
+    assert_eq!(es, 1.0f32.exp());
+    assert_eq!(jit::read_output::<i32>(&mi, &[2]), [4, -1]);
+    assert_eq!(jit::read_output::<i32>(&si, &[1, 3]), [i32::MAX, 1, 0]);
+    assert_eq!(jit::read_output::<u32>(&mu, &[2]), [7, u32::MAX]);
+}

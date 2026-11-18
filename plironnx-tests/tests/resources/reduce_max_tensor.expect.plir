@@ -1,0 +1,42 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x1x2x4 : builtin.fp32 >) -> (tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1x1x2x4 : builtin.fp32 >, tensor.ranked <1x1x2x1 : builtin.fp32 >, tensor.ranked <1x2x4 : builtin.fp32 >, tensor.ranked <1x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(x_v0: tensor.ranked <1x1x2x4 : builtin.fp32 >) !0:
+        v9 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v10 = tensor.splat v9 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v11 = tensor.reduce <Max> [0, 1, 2, 3] x_v0, v10 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v12 = tensor.reshape v11 : tensor.ranked < : builtin.fp32 >;
+        reducemax1_out1_v13 = tensor.reshape v12 : tensor.ranked <1 : builtin.fp32 > !1;
+        v14 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v15 = tensor.splat v14 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v16 = tensor.reduce <Max> [0, 1, 2, 3] x_v0, v15 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v17 = tensor.reshape v16 : tensor.ranked < : builtin.fp32 >;
+        reducemax2_out1_v18 = tensor.reshape v17 : tensor.ranked <1 : builtin.fp32 > !2;
+        v19 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v20 = tensor.splat v19 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        reducemax3_out1_v21 = tensor.reduce <Max> [1] x_v0, v20 : tensor.ranked <1x1x2x4 : builtin.fp32 > !3;
+        v22 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v23 = tensor.splat v22 : tensor.ranked <1x1x2x1 : builtin.fp32 >;
+        reducemax4_out1_v24 = tensor.reduce <Max> [3] x_v0, v23 : tensor.ranked <1x1x2x1 : builtin.fp32 > !4;
+        v25 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v26 = tensor.splat v25 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        v27 = tensor.reduce <Max> [0] x_v0, v26 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        reducemax5_out1_v28 = tensor.reshape v27 : tensor.ranked <1x2x4 : builtin.fp32 > !5;
+        v29 = builtin.constant <builtin.single -Inf> : builtin.fp32 ;
+        v30 = tensor.splat v29 : tensor.ranked <1x1x1x4 : builtin.fp32 >;
+        v31 = tensor.reduce <Max> [0, 2] x_v0, v30 : tensor.ranked <1x1x1x4 : builtin.fp32 >;
+        reducemax6_out1_v32 = tensor.reshape v31 : tensor.ranked <1x4 : builtin.fp32 > !6;
+        onnx.return reducemax1_out1_v13, reducemax2_out1_v18, reducemax3_out1_v21, reducemax4_out1_v24, reducemax5_out1_v28, reducemax6_out1_v32
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [x]]
+!1 = [builtin_given_names = builtin.given_names [reducemax1_out1]]
+!2 = [builtin_given_names = builtin.given_names [reducemax2_out1]]
+!3 = [builtin_given_names = builtin.given_names [reducemax3_out1]]
+!4 = [builtin_given_names = builtin.given_names [reducemax4_out1]]
+!5 = [builtin_given_names = builtin.given_names [reducemax5_out1]]
+!6 = [builtin_given_names = builtin.given_names [reducemax6_out1]]

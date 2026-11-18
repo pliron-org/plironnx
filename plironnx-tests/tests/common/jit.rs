@@ -119,8 +119,9 @@ pub fn read_f32_output<const D: usize>(descriptor: &[u8], shape: [usize; D]) -> 
 }
 
 /// Compile and run a test model with one f32 tensor input and one f32 tensor output.
-/// `output_shape` (of any rank) specifies the expected static output dimensions.
-/// `model_path` may be absolute, or relative to [common::onnx_tests_dir].
+///
+/// - `output_shape` (of any rank) specifies the expected static output dimensions.
+/// - `model_path` may be absolute, or relative to [common::onnx_tests_dir].
 pub fn run_single_f32<const INPUT_D: usize, const OUTPUT_D: usize>(
     model_path: impl AsRef<Path>,
     input: &Tensor<INPUT_D>,
@@ -135,4 +136,32 @@ pub fn run_single_f32<const INPUT_D: usize, const OUTPUT_D: usize>(
         &[output.as_mut_ptr()],
     );
     read_f32_output(&output, output_shape)
+}
+
+/// Compile and run a test model with one f32 tensor input and one or more f32 tensor outputs,
+/// and return the elements of each output.
+///
+/// - `output_shapes` specifies the expected static shape of each output.
+/// - `model_path` may be absolute, or relative to [common::onnx_tests_dir].
+pub fn run_f32_outputs<const INPUT_D: usize>(
+    model_path: impl AsRef<Path>,
+    input: &Tensor<INPUT_D>,
+    output_shapes: &[&[usize]],
+) -> Vec<Vec<f32>> {
+    let input_data = input.to_data();
+    let input_descriptor = build_input_descriptor::<f32>(&input_data);
+    let mut outputs: Vec<Vec<u8>> = output_shapes
+        .iter()
+        .map(|shape| build_empty_output_descriptor(shape.len()))
+        .collect();
+    let output_ptrs: Vec<*mut u8> = outputs
+        .iter_mut()
+        .map(|output| output.as_mut_ptr())
+        .collect();
+    run_packed(model_path, &[input_descriptor.as_ptr()], &output_ptrs);
+    outputs
+        .iter()
+        .zip(output_shapes)
+        .map(|(output, shape)| read_output::<f32>(output, shape))
+        .collect()
 }

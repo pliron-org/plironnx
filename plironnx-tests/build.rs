@@ -33,9 +33,18 @@ fn main() {
         "flatten/flatten.onnx",
         "flatten/flatten_2d.onnx",
         "flatten/flatten_rank1.onnx",
+        "exp/exp.onnx",
+        "reduce/reduce_max.onnx",
+        "reduce/reduce_sum.onnx",
+        "softmax/softmax.onnx",
     ]
     .map(|model| common::onnx_tests_dir().join(model));
-    let local_models = ["mlp/mlp.onnx"].map(|model| common::local_models_dir().join(model));
+    let local_models = [
+        "mlp/mlp.onnx",
+        "mlp/mlp_softmax.onnx",
+        "softmax/softmax_middle_axis.onnx",
+    ]
+    .map(|model| common::local_models_dir().join(model));
 
     let mut model_gen = ModelGen::new();
     for model in models.iter().chain(&local_models) {

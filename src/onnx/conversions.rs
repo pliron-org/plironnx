@@ -3,17 +3,21 @@
 
 //! Lower ONNX operations to tensor and LLVM operations.
 
+use std::num::NonZero;
+
 use pliron::{
     attribute::boxed_attr_cast,
     builtin::{
+        attr_interfaces::TypedAttrInterface,
+        attributes::{FPDoubleAttr, FPHalfAttr, FPSingleAttr, IntegerAttr},
         op_interfaces::{OneOpdInterface, OneResultInterface},
         ops::ConstantOp as BuiltinConstantOp,
         type_interfaces::FloatTypeInterface,
-        types::IntegerType,
+        types::{FP16Type, FP32Type, FP64Type, IntegerType, Signedness},
     },
     context::{Context, Ptr},
     derive::{op_interface, op_interface_impl},
-    input_error,
+    input_error, input_error_noloc,
     irbuild::{
         dialect_conversion::{DialectConversion, DialectConversionRewriter, OperandsInfo},
         inserter::Inserter,
@@ -24,6 +28,10 @@ use pliron::{
     printable::Printable,
     result::Result,
     r#type::{TypeHandle, Typed, TypedHandle, type_cast, type_impls},
+    utils::{
+        apfloat::{Double, Float, Half, Single},
+        apint::APInt,
+    },
     value::Value,
 };
 use pliron_llvm::{
@@ -40,24 +48,27 @@ use pliron_llvm::{
 use pliron_tensor::{
     memref::{
         attributes::DenseElementsAttr,
-        op_interfaces::TransposeOpInterface,
+        op_interfaces::{TransposeOpInterface, reduced_shape},
         type_interfaces::{DenseElementTypeHandle, Dimension, MultiDimensionalType, ShapedType},
     },
     tensor::{
+        attributes::ReductionKindAttr,
+        op_interfaces::ElementWiseUnaryTensorOpInterface,
         ops::{
             AddOp as TensorAddOp, BatchMatMulOp, BroadcastOp as TensorBroadcastOp,
-            ConstantOp as TensorConstantOp, DivOp as TensorDivOp, ElementwiseCastOp, ExtractOp,
-            MatMulOp as TensorMatMulOp, MaxOp as TensorMaxOp, MulOp as TensorMulOp,
-            ReshapeOp as TensorReshapeOp, SplatOp, SubOp as TensorSubOp,
-            TransposeOp as TensorTransposeOp,
+            ConstantOp as TensorConstantOp, DivOp as TensorDivOp, ElementwiseCastOp,
+            ExpOp as TensorExpOp, ExtractOp, MatMulOp as TensorMatMulOp, MaxOp as TensorMaxOp,
+            MulOp as TensorMulOp, ReduceOp as TensorReduceOp, ReshapeOp as TensorReshapeOp,
+            SplatOp, SubOp as TensorSubOp, TransposeOp as TensorTransposeOp,
         },
         types::RankedTensorType,
     },
 };
 
 use crate::onnx::ops::{
-    AddOp, BroadcastableBinaryOpInterface, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp,
-    ReshapeOp, SubOp, TransposeOp, matmul_shapes,
+    AddOp, BroadcastableBinaryOpInterface, CastOp, ConstantOp, DivOp, ExpOp, MatMulOp, MulOp,
+    ReduceMaxOp, ReduceOpInterface, ReduceSumOp, ReluOp, ReshapeOp, SubOp, TransposeOp,
+    matmul_shapes,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -76,6 +87,8 @@ pub enum OnnxToTensorErr {
     },
     #[error("cannot lower ONNX cast from {from} to {to}")]
     UnsupportedCast { from: String, to: String },
+    #[error("{0} has no lowest value for the start of a maximum")]
+    NoLowestValue(String),
 }
 
 enum ScalarCastKind {
@@ -412,6 +425,7 @@ impl ToTensorDialect for CastOp {
 }
 
 /// Lowers `onnx.relu` to `tensor.max` with a splat of zero.
+///
 /// A scalar operand goes through a rank-0 tensor.
 ///
 /// ```text
@@ -472,6 +486,108 @@ impl ToTensorDialect for ReluOp {
         };
         rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![result]);
         Ok(())
+    }
+}
+
+/// Lowers `onnx.exp` to `tensor.exp`.
+///
+/// A scalar operand goes through a rank-0 tensor.
+///
+/// ```text
+/// %r = onnx.exp %t : tensor<2x3xf32>
+/// %s = onnx.exp %x : f32
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %r = tensor.exp %t : tensor<2x3xf32>
+///
+/// %x_t = tensor.splat %x : tensor<f32>
+/// %r_t = tensor.exp %x_t : tensor<f32>
+/// %s = tensor.extract %r_t[] : f32
+/// ```
+#[op_interface_impl]
+impl ToTensorDialect for ExpOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        let input = self.get_operand(ctx);
+        let input_type = input.get_type(ctx);
+        let result = if ranked_tensor_type(ctx, input).is_some() {
+            let exp = TensorExpOp::new(ctx, input);
+            rewriter.append_op(ctx, &exp);
+            exp.get_result(ctx)
+        } else {
+            let tensor_type = RankedTensorType::get(ctx, input_type, vec![]);
+            let splat = SplatOp::new(ctx, input, vec![], tensor_type);
+            rewriter.append_op(ctx, &splat);
+            let exp = TensorExpOp::new(ctx, splat.get_result(ctx));
+            rewriter.append_op(ctx, &exp);
+            let extract = ExtractOp::new(ctx, input_type, exp.get_result(ctx), vec![]);
+            rewriter.append_op(ctx, &extract);
+            extract.get_result(ctx)
+        };
+        rewriter.replace_operation_with_values(ctx, self.get_operation(), vec![result]);
+        Ok(())
+    }
+}
+
+/// Lowers `onnx.reduce_max` to `tensor.reduce <Max>`.
+///
+/// See [lower_reduce] for the accumulator and the result shape.
+///
+/// ```text
+/// %r = onnx.reduce_max %t [1] keepdims=false : tensor<2xf32>   // %t: tensor<2x3xf32>
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %lowest = builtin.constant -inf : f32
+/// %init = tensor.splat %lowest : tensor<2x1xf32>
+/// %m = tensor.reduce <Max> [1] %t, %init : tensor<2x1xf32>
+/// %r = tensor.reshape %m : tensor<2xf32>
+/// ```
+#[op_interface_impl]
+impl ToTensorDialect for ReduceMaxOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        lower_reduce(ctx, rewriter, self, ReductionKindAttr::Max, lowest_scalar)
+    }
+}
+
+/// Lowers `onnx.reduce_sum` to `tensor.reduce <Sum>`.
+///
+/// See [lower_reduce] for the accumulator and the result shape.
+///
+/// ```text
+/// %r = onnx.reduce_sum %t [1] keepdims=true : tensor<2x1xf32>   // %t: tensor<2x3xf32>
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %zero = builtin.constant 0.0 : f32
+/// %init = tensor.splat %zero : tensor<2x1xf32>
+/// %r = tensor.reduce <Sum> [1] %t, %init : tensor<2x1xf32>
+/// ```
+#[op_interface_impl]
+impl ToTensorDialect for ReduceSumOp {
+    fn rewrite(
+        &self,
+        ctx: &mut Context,
+        rewriter: &mut DialectConversionRewriter,
+        _operands_info: &OperandsInfo,
+    ) -> Result<()> {
+        lower_reduce(ctx, rewriter, self, ReductionKindAttr::Sum, zero_scalar)
     }
 }
 
@@ -714,6 +830,54 @@ fn lower_binary_op<TensorOp: Op, FloatOp: Op, IntegerOp: Op>(
     Ok(())
 }
 
+/// Lower `source` to `tensor.reduce <kind>`, with an accumulator that starts at `identity`.
+///
+/// ```text
+/// %r = onnx.reduce_<op> %t [1] keepdims=false : tensor<2xf32>   // %t: tensor<2x3xf32>
+/// ```
+///
+/// becomes:
+///
+/// ```text
+/// %identity = builtin.constant <identity of kind> : f32
+/// %init = tensor.splat %identity : tensor<2x1xf32>
+/// %reduced = tensor.reduce <kind> [1] %t, %init : tensor<2x1xf32>
+/// %r = tensor.reshape %reduced : tensor<2xf32>   // only without `keepdims`
+/// ```
+fn lower_reduce(
+    ctx: &mut Context,
+    rewriter: &mut DialectConversionRewriter,
+    source: &dyn ReduceOpInterface,
+    kind: ReductionKindAttr,
+    identity: fn(&mut Context, &mut DialectConversionRewriter, TypeHandle) -> Result<Value>,
+) -> Result<()> {
+    let result_type = TypedHandle::<RankedTensorType>::from_handle(source.result_type(ctx), ctx)?;
+    require_static_result(ctx, source, result_type)?;
+    let input = source.get_operand(ctx);
+    let input_type = ranked_tensor_type(ctx, input).expect("onnx reductions have a tensor input");
+    // The accumulator shape comes from the input shape.
+    require_static_operand(ctx, source, input_type)?;
+
+    let reduced_dims = source.reduced_dims(ctx);
+    let (element_type, accum_shape) = {
+        let input_type = input_type.deref(ctx);
+        (
+            input_type.element_type(),
+            reduced_shape(input_type.shape(), &reduced_dims),
+        )
+    };
+    let accum_type = RankedTensorType::get(ctx, element_type, accum_shape);
+    let init = identity(ctx, rewriter, element_type)?;
+    let accum = SplatOp::new(ctx, init, vec![], accum_type);
+    rewriter.append_op(ctx, &accum);
+
+    let reduce = TensorReduceOp::new(ctx, kind, reduced_dims, input, accum.get_result(ctx));
+    rewriter.append_op(ctx, &reduce);
+    let result = reshape_to(ctx, rewriter, reduce.get_result(ctx), result_type);
+    rewriter.replace_operation_with_values(ctx, source.get_operation(), vec![result]);
+    Ok(())
+}
+
 /// Build the binary operation `new_op(lhs, rhs)`, append it, and return its result.
 fn append_binary<T: Op>(
     ctx: &mut Context,
@@ -808,6 +972,45 @@ fn zero_scalar(
         element.element_attr(ctx, &vec![0u8; element.element_size()])
     };
     let op = BuiltinConstantOp::new(ctx, zero);
+    rewriter.append_op(ctx, &op);
+    Ok(op.get_result(ctx))
+}
+
+/// Build `element_ty`'s lowest value as a `builtin.constant`.
+///
+/// - `-inf` for a float
+/// - 0 for an unsigned integer
+/// - the most negative value for a signed or signless integer.
+fn lowest_scalar(
+    ctx: &mut Context,
+    rewriter: &mut DialectConversionRewriter,
+    element_type: TypeHandle,
+) -> Result<Value> {
+    let lowest: Box<dyn TypedAttrInterface> = {
+        let ty = element_type.deref(ctx);
+        if ty.is::<FP16Type>() {
+            Box::new(FPHalfAttr(-Half::INFINITY))
+        } else if ty.is::<FP32Type>() {
+            Box::new(FPSingleAttr(-Single::INFINITY))
+        } else if ty.is::<FP64Type>() {
+            Box::new(FPDoubleAttr(-Double::INFINITY))
+        } else if let Some(int_ty) = ty.downcast_ref::<IntegerType>() {
+            let width = NonZero::new(int_ty.width() as usize)
+                .expect("an integer must have a non-zero bitwidth");
+            let lowest = if int_ty.signedness() == Signedness::Unsigned {
+                APInt::zero(width)
+            } else {
+                APInt::imin(width)
+            };
+            let int_ty = TypedHandle::<IntegerType>::from_handle(element_type, ctx)?;
+            Box::new(IntegerAttr::new(int_ty, lowest))
+        } else {
+            return Err(input_error_noloc!(OnnxToTensorErr::NoLowestValue(
+                element_type.disp(ctx).to_string()
+            )));
+        }
+    };
+    let op = BuiltinConstantOp::new(ctx, lowest);
     rewriter.append_op(ctx, &op);
     Ok(op.get_result(ctx))
 }

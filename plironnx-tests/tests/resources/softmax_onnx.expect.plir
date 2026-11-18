@@ -1,0 +1,18 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <2x3 : builtin.fp32 >) -> (tensor.ranked <2x3 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(x_v0: tensor.ranked <2x3 : builtin.fp32 >) !0:
+        v1 = onnx.reduce_max x_v0 [1] keepdims=true : tensor.ranked <2x1 : builtin.fp32 >;
+        v2 = onnx.sub x_v0, v1 : tensor.ranked <2x3 : builtin.fp32 >;
+        v3 = onnx.exp v2 : tensor.ranked <2x3 : builtin.fp32 >;
+        v4 = onnx.reduce_sum v3 [1] keepdims=true : tensor.ranked <2x1 : builtin.fp32 >;
+        softmax1_out1_v5 = onnx.div v3, v4 : tensor.ranked <2x3 : builtin.fp32 > !1;
+        onnx.return softmax1_out1_v5
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [x]]
+!1 = [builtin_given_names = builtin.given_names [softmax1_out1]]

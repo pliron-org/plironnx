@@ -1,0 +1,42 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x1x2x4 : builtin.fp32 >) -> (tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1x1x2x4 : builtin.fp32 >, tensor.ranked <1x1x2x1 : builtin.fp32 >, tensor.ranked <1x2x4 : builtin.fp32 >, tensor.ranked <1x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(onnx_reduce_sum_0_v0: tensor.ranked <1x1x2x4 : builtin.fp32 >) !0:
+        v9 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v10 = tensor.splat v9 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v11 = tensor.reduce <Sum> [0, 1, 2, 3] onnx_reduce_sum_0_v0, v10 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v12 = tensor.reshape v11 : tensor.ranked < : builtin.fp32 >;
+        reducesum1_out1_v13 = tensor.reshape v12 : tensor.ranked <1 : builtin.fp32 > !1;
+        v14 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v15 = tensor.splat v14 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v16 = tensor.reduce <Sum> [0, 1, 2, 3] onnx_reduce_sum_0_v0, v15 : tensor.ranked <1x1x1x1 : builtin.fp32 >;
+        v17 = tensor.reshape v16 : tensor.ranked < : builtin.fp32 >;
+        reducesum2_out1_v18 = tensor.reshape v17 : tensor.ranked <1 : builtin.fp32 > !2;
+        v19 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v20 = tensor.splat v19 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        reducesum3_out1_v21 = tensor.reduce <Sum> [1] onnx_reduce_sum_0_v0, v20 : tensor.ranked <1x1x2x4 : builtin.fp32 > !3;
+        v22 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v23 = tensor.splat v22 : tensor.ranked <1x1x2x1 : builtin.fp32 >;
+        reducesum4_out1_v24 = tensor.reduce <Sum> [3] onnx_reduce_sum_0_v0, v23 : tensor.ranked <1x1x2x1 : builtin.fp32 > !4;
+        v25 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v26 = tensor.splat v25 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        v27 = tensor.reduce <Sum> [0] onnx_reduce_sum_0_v0, v26 : tensor.ranked <1x1x2x4 : builtin.fp32 >;
+        reducesum5_out1_v28 = tensor.reshape v27 : tensor.ranked <1x2x4 : builtin.fp32 > !5;
+        v29 = builtin.constant <builtin.single 0> : builtin.fp32 ;
+        v30 = tensor.splat v29 : tensor.ranked <1x1x1x4 : builtin.fp32 >;
+        v31 = tensor.reduce <Sum> [0, 2] onnx_reduce_sum_0_v0, v30 : tensor.ranked <1x1x1x4 : builtin.fp32 >;
+        reducesum6_out1_v32 = tensor.reshape v31 : tensor.ranked <1x4 : builtin.fp32 > !6;
+        onnx.return reducesum1_out1_v13, reducesum2_out1_v18, reducesum3_out1_v21, reducesum4_out1_v24, reducesum5_out1_v28, reducesum6_out1_v32
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [onnx_reduce_sum_0]]
+!1 = [builtin_given_names = builtin.given_names [reducesum1_out1]]
+!2 = [builtin_given_names = builtin.given_names [reducesum2_out1]]
+!3 = [builtin_given_names = builtin.given_names [reducesum3_out1]]
+!4 = [builtin_given_names = builtin.given_names [reducesum4_out1]]
+!5 = [builtin_given_names = builtin.given_names [reducesum5_out1]]
+!6 = [builtin_given_names = builtin.given_names [reducesum6_out1]]

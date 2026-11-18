@@ -7,7 +7,10 @@ use std::path::Path;
 
 use onnx_ir::{
     ArgType, Argument, DType, DataId, Node, OnnxGraph, OnnxGraphBuilder, TensorData, ValueSource,
-    node::reshape::ReshapeInput,
+    node::{
+        reduce::{ReduceAxes, ReduceConfig},
+        reshape::ReshapeInput,
+    },
 };
 
 use pliron::{
@@ -35,8 +38,8 @@ use pliron::{
 use crate::onnx::{
     attributes::{constant_value_attr, constant_value_attr_from_bytes},
     ops::{
-        AddOp, CastOp, ConstantOp, DivOp, MatMulOp, MulOp, ReluOp, ReshapeOp, ReturnOp, SubOp,
-        TransposeOp, matmul_shapes,
+        AddOp, CastOp, ConstantOp, DivOp, ExpOp, MatMulOp, MulOp, ReduceMaxOp, ReduceSumOp, ReluOp,
+        ReshapeOp, ReturnOp, SubOp, TransposeOp, matmul_shapes, onnx_reduced_shape,
     },
     types::{
         arg_dtype, arg_type_to_type, dtype_to_type, is_arg_element_signed, is_arg_element_unsigned,
@@ -83,6 +86,14 @@ pub enum FromOnnxGraphErr {
     UnsignedIntegerDiv(String),
     #[error("The node `{0}` applies Relu to unsigned integers, which ONNX does not permit")]
     UnsignedIntegerRelu(String),
+    #[error(
+        "The node `{0}` takes the maximum of unsigned integers or booleans, which is not supported"
+    )]
+    UnsignedIntegerReduceMax(String),
+    #[error("The node `{0}` needs compile-time reduction axes")]
+    DynamicReduceAxes(String),
+    #[error("The input of the node `{0}` must be a tensor")]
+    NotATensor(String),
     #[error(
         "The node `{node}` scales {dtype} elements by {scale}, \
          which is not a value of that element type"
@@ -428,6 +439,69 @@ fn build_node(
             Ok(vec![result])
         }
 
+        Node::Exp(exp) => {
+            expect_arity(node, exp.inputs.len(), 1, exp.outputs.len(), 1)?;
+            let input = resolve_operand(ctx, ins, scopes, &exp.inputs[0], &exp.name)?;
+            let op = ExpOp::new(ctx, input);
+            let result = op.get_result(ctx);
+            ins.append_op(ctx, &op);
+            Ok(vec![result])
+        }
+
+        Node::ReduceMax(reduce) => {
+            // Integer types are signless, and a signless maximum compares signed values.
+            let not_signed = |input: &Argument| {
+                is_arg_element_unsigned(&input.ty)
+                    || matches!(arg_dtype(&input.ty), Some(DType::Bool(_)))
+            };
+            if reduce.inputs.first().is_some_and(not_signed) {
+                return input_err_noloc!(FromOnnxGraphErr::UnsignedIntegerReduceMax(
+                    reduce.name.clone()
+                ));
+            }
+            build_reduce(
+                ctx,
+                ins,
+                scopes,
+                node,
+                (&reduce.inputs, &reduce.outputs),
+                &reduce.config,
+                ReduceMaxOp::new,
+            )
+        }
+
+        Node::ReduceSum(reduce) => build_reduce(
+            ctx,
+            ins,
+            scopes,
+            node,
+            (&reduce.inputs, &reduce.outputs),
+            &reduce.config,
+            ReduceSumOp::new,
+        ),
+
+        // `softmax(x) = exp(x - m) / sum(exp(x - m))` along `axis`, where
+        // - `m` is the maximum of `x` along `axis`
+        // - `x - m <= 0` -> `exp(x - m) <= 1`, ensuring that `exp` does not overflow
+        Node::Softmax(softmax) => {
+            expect_arity(node, softmax.inputs.len(), 1, softmax.outputs.len(), 1)?;
+            let input = resolve_operand(ctx, ins, scopes, &softmax.inputs[0], &softmax.name)?;
+            let declared = arg_type_to_type(ctx, &softmax.outputs[0].ty)?;
+            let input_ty = input.get_type(ctx);
+            let reduced_dims = vec![softmax.config.axis];
+
+            let max_dims = (reduced_dims.clone(), true);
+            let max = append_reduce(ctx, ins, node, input, max_dims, None, ReduceMaxOp::new)?;
+            let shifted = append_binary(ctx, ins, node, input, max, input_ty, SubOp::new)?;
+            let exp = ExpOp::new(ctx, shifted);
+            let exp_result = exp.get_result(ctx);
+            ins.append_op(ctx, &exp);
+            let sum_dims = (reduced_dims, true);
+            let sum = append_reduce(ctx, ins, node, exp_result, sum_dims, None, ReduceSumOp::new)?;
+            let result = append_binary(ctx, ins, node, exp_result, sum, declared, DivOp::new)?;
+            Ok(vec![result])
+        }
+
         Node::Cast(cast) => {
             expect_arity(node, cast.inputs.len(), 1, cast.outputs.len(), 1)?;
             let input = resolve_operand(ctx, ins, scopes, &cast.inputs[0], &cast.name)?;
@@ -526,6 +600,100 @@ fn append_binary<T: Op>(
     let op = new_op(ctx, lhs, rhs, result_ty);
     let result = op.get_operation().deref(ctx).get_result(0);
     ins.append_op(ctx, &op);
+    Ok(result)
+}
+
+/// Constructor of an ONNX reduction op, such as [ReduceMaxOp::new].
+type ReduceOpBuilder<T> =
+    fn(&mut Context, Value, Vec<usize>, bool, TypedHandle<RankedTensorType>) -> T;
+
+/// Build an ONNX reduction node with the configuration `config`.
+///
+/// An empty `axes` reduces all dimensions, or none if `noop_with_empty_axes` is set.
+fn build_reduce<T: Op>(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    scopes: &mut ValueScopes,
+    node: &Node,
+    (inputs, outputs): (&[Argument], &[Argument]),
+    config: &ReduceConfig,
+    new_op: ReduceOpBuilder<T>,
+) -> Result<Vec<Value>> {
+    // The optional second input holds the axes, which `config` already has.
+    let num_inputs = inputs.len().clamp(1, 2);
+    expect_arity(node, inputs.len(), num_inputs, outputs.len(), 1)?;
+    let ReduceAxes::Static(axes) = &config.axes else {
+        return input_err_noloc!(FromOnnxGraphErr::DynamicReduceAxes(node.name().to_string()));
+    };
+    let input = resolve_operand(ctx, ins, scopes, &inputs[0], node.name())?;
+    let rank = value_shape(ctx, input.get_type(ctx)).map_or(0, |shape| shape.len());
+    let reduced_dims = match (axes.is_empty(), config.noop_with_empty_axes) {
+        (true, true) => return Ok(vec![input]),
+        (true, false) => (0..rank).collect(),
+        (false, _) => axes.clone(),
+    };
+    let declared = arg_type_to_type(ctx, &outputs[0].ty)?;
+    let result = append_reduce(
+        ctx,
+        ins,
+        node,
+        input,
+        (reduced_dims, config.keepdims),
+        Some(declared),
+        new_op,
+    )?;
+    Ok(vec![result])
+}
+
+/// Append a reduction of `reduced_dims` of the tensor `input`, and return its result.
+///
+/// The result type is the ONNX result shape, refined with the `declared` type if
+/// there is one. burn declares the rank-0 result of a full reduction without
+/// `keepdims` as a tensor of shape `[1]`, so that result is reshaped to `declared`.
+fn append_reduce<T: Op>(
+    ctx: &mut Context,
+    ins: &mut OpInserter,
+    node: &Node,
+    input: Value,
+    (reduced_dims, keepdims): (Vec<usize>, bool),
+    declared: Option<TypeHandle>,
+    new_op: ReduceOpBuilder<T>,
+) -> Result<Value> {
+    let Ok(input_ty) = TypedHandle::<RankedTensorType>::from_handle(input.get_type(ctx), ctx)
+    else {
+        return input_err_noloc!(FromOnnxGraphErr::NotATensor(node.name().to_string()));
+    };
+    let (element_type, inferred) = {
+        let input_ty = input_ty.deref(ctx);
+        (
+            input_ty.element_type(),
+            onnx_reduced_shape(input_ty.shape(), &reduced_dims, keepdims),
+        )
+    };
+    let inferred_ty: TypeHandle = RankedTensorType::get(ctx, element_type, inferred.clone()).into();
+    let result_ty = match declared {
+        Some(declared) => refine_result_type(ctx, node, declared, Some(inferred.clone()))?,
+        None => inferred_ty,
+    };
+    let reduce_ty =
+        if value_shape(ctx, result_ty).is_some_and(|shape| shape.len() == inferred.len()) {
+            result_ty
+        } else {
+            inferred_ty
+        };
+
+    let reduce_ty = TypedHandle::<RankedTensorType>::from_handle(reduce_ty, ctx)?;
+    let op = new_op(ctx, input, reduced_dims, keepdims, reduce_ty);
+    let mut result = op.get_operation().deref(ctx).get_result(0);
+    ins.append_op(ctx, &op);
+
+    if TypeHandle::from(reduce_ty) != result_ty {
+        let result_ty = TypedHandle::<RankedTensorType>::from_handle(result_ty, ctx)?;
+        require_static_reshape(ctx, node, result_ty)?;
+        let reshape = ReshapeOp::new(ctx, result, result_ty);
+        result = reshape.get_result(ctx);
+        ins.append_op(ctx, &reshape);
+    }
     Ok(result)
 }
 

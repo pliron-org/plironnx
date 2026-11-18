@@ -1,0 +1,26 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x1x2x4 : builtin.fp32 >) -> (tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1x1x2x4 : builtin.fp32 >, tensor.ranked <1x1x2x1 : builtin.fp32 >, tensor.ranked <1x2x4 : builtin.fp32 >, tensor.ranked <1x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(onnx_reduce_sum_0_v0: tensor.ranked <1x1x2x4 : builtin.fp32 >) !0:
+        v1 = onnx.reduce_sum onnx_reduce_sum_0_v0 [0, 1, 2, 3] keepdims=false : tensor.ranked < : builtin.fp32 >;
+        reducesum1_out1_v2 = onnx.reshape v1 to tensor.ranked <1 : builtin.fp32 > !1;
+        v3 = onnx.reduce_sum onnx_reduce_sum_0_v0 [0, 1, 2, 3] keepdims=false : tensor.ranked < : builtin.fp32 >;
+        reducesum2_out1_v4 = onnx.reshape v3 to tensor.ranked <1 : builtin.fp32 > !2;
+        reducesum3_out1_v5 = onnx.reduce_sum onnx_reduce_sum_0_v0 [1] keepdims=true : tensor.ranked <1x1x2x4 : builtin.fp32 > !3;
+        reducesum4_out1_v6 = onnx.reduce_sum onnx_reduce_sum_0_v0 [3] keepdims=true : tensor.ranked <1x1x2x1 : builtin.fp32 > !4;
+        reducesum5_out1_v7 = onnx.reduce_sum onnx_reduce_sum_0_v0 [0] keepdims=false : tensor.ranked <1x2x4 : builtin.fp32 > !5;
+        reducesum6_out1_v8 = onnx.reduce_sum onnx_reduce_sum_0_v0 [0, 2] keepdims=false : tensor.ranked <1x4 : builtin.fp32 > !6;
+        onnx.return reducesum1_out1_v2, reducesum2_out1_v4, reducesum3_out1_v5, reducesum4_out1_v6, reducesum5_out1_v7, reducesum6_out1_v8
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [onnx_reduce_sum_0]]
+!1 = [builtin_given_names = builtin.given_names [reducesum1_out1]]
+!2 = [builtin_given_names = builtin.given_names [reducesum2_out1]]
+!3 = [builtin_given_names = builtin.given_names [reducesum3_out1]]
+!4 = [builtin_given_names = builtin.given_names [reducesum4_out1]]
+!5 = [builtin_given_names = builtin.given_names [reducesum5_out1]]
+!6 = [builtin_given_names = builtin.given_names [reducesum6_out1]]

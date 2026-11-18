@@ -1,0 +1,26 @@
+builtin.module @onnx_module 
+{
+  ^block1v1():
+    builtin.func @model: builtin.function <(tensor.ranked <1x1x2x4 : builtin.fp32 >) -> (tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1 : builtin.fp32 >, tensor.ranked <1x1x2x4 : builtin.fp32 >, tensor.ranked <1x1x2x1 : builtin.fp32 >, tensor.ranked <1x2x4 : builtin.fp32 >, tensor.ranked <1x4 : builtin.fp32 >)> 
+    {
+      ^entry_block2v1(x_v0: tensor.ranked <1x1x2x4 : builtin.fp32 >) !0:
+        v1 = onnx.reduce_max x_v0 [0, 1, 2, 3] keepdims=false : tensor.ranked < : builtin.fp32 >;
+        reducemax1_out1_v2 = onnx.reshape v1 to tensor.ranked <1 : builtin.fp32 > !1;
+        v3 = onnx.reduce_max x_v0 [0, 1, 2, 3] keepdims=false : tensor.ranked < : builtin.fp32 >;
+        reducemax2_out1_v4 = onnx.reshape v3 to tensor.ranked <1 : builtin.fp32 > !2;
+        reducemax3_out1_v5 = onnx.reduce_max x_v0 [1] keepdims=true : tensor.ranked <1x1x2x4 : builtin.fp32 > !3;
+        reducemax4_out1_v6 = onnx.reduce_max x_v0 [3] keepdims=true : tensor.ranked <1x1x2x1 : builtin.fp32 > !4;
+        reducemax5_out1_v7 = onnx.reduce_max x_v0 [0] keepdims=false : tensor.ranked <1x2x4 : builtin.fp32 > !5;
+        reducemax6_out1_v8 = onnx.reduce_max x_v0 [0, 2] keepdims=false : tensor.ranked <1x4 : builtin.fp32 > !6;
+        onnx.return reducemax1_out1_v2, reducemax2_out1_v4, reducemax3_out1_v5, reducemax4_out1_v6, reducemax5_out1_v7, reducemax6_out1_v8
+    }
+}
+
+outlined_attributes:
+!0 = [builtin_given_names = builtin.given_names [x]]
+!1 = [builtin_given_names = builtin.given_names [reducemax1_out1]]
+!2 = [builtin_given_names = builtin.given_names [reducemax2_out1]]
+!3 = [builtin_given_names = builtin.given_names [reducemax3_out1]]
+!4 = [builtin_given_names = builtin.given_names [reducemax4_out1]]
+!5 = [builtin_given_names = builtin.given_names [reducemax5_out1]]
+!6 = [builtin_given_names = builtin.given_names [reducemax6_out1]]
